@@ -9,6 +9,7 @@ import { Star, PenLine, User } from "lucide-react";
 import Link from "next/link";
 
 import { useAuth } from "@/store/useAuth";
+import StarRating from "@/components/StarRating";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -265,17 +266,12 @@ export default function ProductReviewsSection({
           </h2>
           {visibleReviews.length > 0 && (
             <p className="mt-0.5 flex items-center gap-2 text-sm text-neutral-500">
-              <span className="flex gap-0.5">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Star
-                    key={n}
-                    className={`size-3.5 ${n <= Math.round(avgRating) ? "text-amber-400" : "text-neutral-200"}`}
-                    fill={n <= Math.round(avgRating) ? "currentColor" : "none"}
-                    strokeWidth={n <= Math.round(avgRating) ? 0 : 1.5}
-                    aria-hidden
-                  />
-                ))}
-              </span>
+              <StarRating
+                rating={avgRating}
+                sizeClass="size-3.5"
+                filledClass="text-amber-400"
+                emptyClass="text-neutral-200"
+              />
               {avgRating.toFixed(1)} · {visibleReviews.length}{" "}
               {visibleReviews.length === 1 ? "recenzie" : "recenzii"}
             </p>

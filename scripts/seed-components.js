@@ -259,7 +259,7 @@ const PRODUCTS = [
 
   // ── Calculatoare / Desktops (4) ────────────────────────────────────────────
   {
-    name: "PC Gaming TechPoint Elite RTX 4070",
+    name: "PC Gaming BuildTech Elite RTX 4070",
     description:
       "Sistem desktop pre-asamblat pentru gaming 1440p, cu RTX 4070, Ryzen 7 și 32 GB RAM. Carcasă cu airflow optim, SSD NVMe rapid și Windows pregătit pentru instalare imediată.",
     price: 7499,
@@ -269,7 +269,7 @@ const PRODUCTS = [
       "CPU: AMD Ryzen 7 7800X3D\nGPU: RTX 4070 12 GB\nRAM: 32 GB DDR5\nStocare: 1 TB NVMe\nSursă: 750W Gold",
   },
   {
-    name: "PC Office TechPoint Pro i5",
+    name: "PC Office BuildTech Pro i5",
     description:
       "Calculator de birou silențios cu Intel Core i5, 16 GB RAM și SSD de 512 GB. Ideal pentru productivitate, browsing și aplicații office, cu consum redus și pornire rapidă.",
     price: 3299,
@@ -279,7 +279,7 @@ const PRODUCTS = [
       "CPU: Intel Core i5-13400\nGPU: Intel UHD integrată\nRAM: 16 GB DDR4\nStocare: 512 GB NVMe\nFormat: SFF",
   },
   {
-    name: "PC Workstation TechPoint Creator",
+    name: "PC Workstation BuildTech Creator",
     description:
       "Stație de lucru pentru editare video și randare 3D, echipată cu 64 GB RAM și RTX 4070 Ti. Stocare duală NVMe + HDD și sursă premium pentru sesiuni lungi de lucru.",
     price: 10999,
@@ -289,7 +289,7 @@ const PRODUCTS = [
       "CPU: Intel Core i7-14700K\nGPU: RTX 4070 Ti 12 GB\nRAM: 64 GB DDR5\nStocare: 2 TB NVMe + 4 TB HDD\nSursă: 850W Gold",
   },
   {
-    name: "PC Gaming TechPoint Starter GTX",
+    name: "PC Gaming BuildTech Starter GTX",
     description:
       "Sistem entry-level pentru gaming 1080p și eSports, cu RTX 4060 și Ryzen 5. Configurație echilibrată, ușor de upgradat, potrivită pentru primul PC de gaming.",
     price: 4599,

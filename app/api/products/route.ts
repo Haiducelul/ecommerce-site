@@ -25,8 +25,11 @@ export async function GET(request: Request) {
     const products = await getProductsByIds(ids);
     return NextResponse.json({
       products: products.map((p) => ({
-        id:    p.id,
-        stock: p.stock,
+        id:        p.id,
+        name:      p.name,
+        price:     p.price,
+        image_url: p.image_url,
+        stock:     p.stock,
       })),
     });
   } catch (err) {

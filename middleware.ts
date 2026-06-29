@@ -4,7 +4,7 @@ import { verifyAdminToken, ADMIN_COOKIE } from "@/lib/adminAuth";
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Let the login page and its API route through unconditionally
+  // Permite accesul necondiționat la pagina de logare și la ruta sa API
   if (
     pathname === "/admin/login" ||
     pathname.startsWith("/api/admin/login")
@@ -12,7 +12,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // All other /admin/* routes require a valid admin JWT cookie
+  // Toate celelalte rute /admin/* necesită un cookie JWT de admin valid
   if (pathname.startsWith("/admin")) {
     const token = req.cookies.get(ADMIN_COOKIE)?.value;
 
@@ -26,8 +26,8 @@ export async function middleware(req: NextRequest) {
       return redirectToLogin(req);
     }
 
-    // Token is valid — attach admin identity as a request header
-    // so server components can read it without re-verifying
+    // Token-ul este valid — atașăm identitatea adminului ca antet (header)
+    // astfel încât componentele de server să o poată citi fără a o reverifica
     const res = NextResponse.next();
     res.headers.set("x-admin-id",    payload.sub);
     res.headers.set("x-admin-name",  payload.name);
@@ -41,12 +41,12 @@ export async function middleware(req: NextRequest) {
 function redirectToLogin(req: NextRequest) {
   const loginUrl = req.nextUrl.clone();
   loginUrl.pathname = "/admin/login";
-  // Preserve the original destination so we can redirect back after login
+  // Păstrăm destinația originală pentru a redirecționa utilizatorul înapoi după logare
   loginUrl.searchParams.set("from", req.nextUrl.pathname);
   return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
-  // Run on all /admin/* paths — skip static assets and Next internals
+  // Rulează pe toate căile /admin/* — ignoră fișierele statice și procesele interne Next.js
   matcher: ["/admin/:path*"],
 };

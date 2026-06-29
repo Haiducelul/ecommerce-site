@@ -19,6 +19,10 @@ export default function DeleteProductButton({ id, name }: Props) {
       const res = await fetch(`/api/admin/products/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          toast("Acțiune respinsă. Te rog să editezi stocul produsului la 0.");
+          return;
+        }
         toast(data.error ?? "Ștergerea a eșuat.");
         return;
       }

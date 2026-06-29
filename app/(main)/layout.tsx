@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import OverlayRouteReset from "@/components/OverlayRouteReset";
 import WishlistHydrator from "@/components/WishlistHydrator";
 import CartHydrator from "@/components/CartHydrator";
 import ComparisonView from "@/components/ComparisonView";
+import SupportButton from "@/components/SupportButton";
+
+export const metadata: Metadata = {
+  title: "BuildTech | Magazin online",
+  description: "Magazin online BuildTech — componente PC, sisteme și accesorii",
+};
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -15,6 +22,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <main className="relative flex flex-1 flex-col">{children}</main>
       <Footer />
       <ComparisonView />
+      <SupportButton />
     </div>
   );
 }

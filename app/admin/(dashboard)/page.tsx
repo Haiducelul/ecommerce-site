@@ -96,9 +96,6 @@ export default async function AdminDashboard() {
         <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
           Bine ai venit, {adminName}!
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Iată o privire de ansamblu asupra platformei Techpoint.
-        </p>
       </div>
 
       {/* Stat cards */}

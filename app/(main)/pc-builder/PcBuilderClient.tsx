@@ -1,12 +1,20 @@
 "use client";
 
+/**
+ * PC Builder — interfață vizuală în 3 moduri (meniu / manual / AI Volt).
+ *
+ * Paletă: verde brand #22624a, fundal deschis #edf5f1, borduri #a8d7c5.
+ * Componente UI: Dialog (shadcn), iconuri Lucide per slot, carduri rounded-2xl.
+ */
+
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import Image from "next/image";
 import {
   Cpu, CircuitBoard, MonitorPlay, MemoryStick,
-  Zap, Server, HardDrive, Wrench, Check,
-  Plus, X, Sparkles, ChevronRight, ChevronLeft, ChevronDown,
-  Bot, History, Trash2, ShoppingCart, RotateCcw,
-  Loader2, SendHorizonal,
+  Zap, Server, HardDrive, Check,
+  Plus, X, Sparkles, ChevronRight, ChevronDown,
+  History, Trash2, ShoppingCart, RotateCcw, Bookmark,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -14,23 +22,24 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { formatPrice } from "@/lib/products";
+import { fetchWithRetry } from "@/lib/fetch-with-retry";
 import { useCart } from "@/hooks/use-cart";
 import { useAuth } from "@/store/useAuth";
 import type { SubcategoryId } from "@/lib/products";
 import type { ComponentProduct } from "./page";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Constante ────────────────────────────────────────────────────────────────
 
 const LS_KEY = "pc_builder_history";
+const DELAY_NOTICE_MS = 4000;
 
-// ─── View state ───────────────────────────────────────────────────────────────
+// ─── Navigare între ecrane (meniu → manual / AI) ─────────────────────────────
 
 type View = "menu" | "manual" | "ai" | "history";
 
-// ─── Slot definitions ─────────────────────────────────────────────────────────
+// ─── Sloturi vizuale — fiecare cu icon Lucide dedicat ─────────────────────────
 
 type SlotId = SubcategoryId;
 
@@ -50,20 +59,85 @@ const SLOTS: Slot[] = [
   { id: "stocare",    label: "Stocare",              icon: HardDrive    },
 ];
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Tipuri date ──────────────────────────────────────────────────────────────
 
 type Build = Partial<Record<SlotId, ComponentProduct>>;
 
 export type SavedBuild = {
-  id:         string;
-  savedAt:    string;
-  totalPrice: number;
-  components: Build;
+  id:           string;
+  savedAt:      string;
+  totalPrice:   number;
+  components:   Build;
+  aiGenerated?: boolean;
 };
 
 type Props = { components: ComponentProduct[] };
 
-// ─── localStorage helpers ─────────────────────────────────────────────────────
+type CompatibilityItem = {
+  icon: string;
+  label: string;
+  detail: string;
+};
+
+type ParsedConclusion = {
+  score: string;
+  note: string;
+};
+
+type ParsedCompatibilityReport = {
+  items: CompatibilityItem[];
+  conclusion: ParsedConclusion | null;
+};
+
+/** Extrage emoji status (✅⚠️❌) + etichetă + detaliu pentru listă în modal */
+function parseStatusLine(line: string): CompatibilityItem | null {
+  const match = line.match(/^([✅⚠️❌])\s*(.+?):\s*(.+)$/);
+  if (!match) return null;
+  return { icon: match[1], label: match[2].trim(), detail: match[3].trim() };
+}
+
+/** Structurează răspunsul Volt în listă + bloc „Concluzie” pentru modal */
+function parseCompatibilityReport(analysis: string): ParsedCompatibilityReport {
+  const lines = analysis.split("\n").map((line) => line.trim()).filter(Boolean);
+  const items: CompatibilityItem[] = [];
+  let conclusionIndex = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (/^Concluzie:?$/i.test(lines[i])) {
+      conclusionIndex = i;
+      break;
+    }
+    const parsed = parseStatusLine(lines[i]);
+    if (parsed) items.push(parsed);
+  }
+
+  if (conclusionIndex >= 0) {
+    return {
+      items,
+      conclusion: {
+        score: lines[conclusionIndex + 1] ?? "",
+        note: lines[conclusionIndex + 2] ?? "",
+      },
+    };
+  }
+
+  // Format alternativ pe o linie — păstrează compatibilitate vizuală
+  for (const line of lines) {
+    const legacy = line.match(/^Concluzie:\s*(.+)$/i);
+    if (!legacy) continue;
+
+    const text = legacy[1].trim();
+    const scoreMatch = text.match(/Compatibilitate:\s*\d+(?:\/10)?%?\.?/i);
+    const score = scoreMatch ? scoreMatch[0].replace(/\.$/, "") + "." : "";
+    const note = text.replace(scoreMatch?.[0] ?? "", "").trim().replace(/^\.\s*/, "");
+
+    return { items, conclusion: { score, note } };
+  }
+
+  return { items, conclusion: null };
+}
+
+// ─── Persistență locală — carduri „Configurații salvate” în meniu ─────────────
 
 function readHistory(): SavedBuild[] {
   if (typeof window === "undefined") return [];
@@ -82,7 +156,7 @@ function buildTotal(build: Build): number {
   return Object.values(build).reduce((sum, p) => sum + (p?.price ?? 0), 0);
 }
 
-// ─── AI Builder view ──────────────────────────────────────────────────────────
+// ─── Ecran „Configurează cu Volt” — chat-style cu prompt + rezultat ───────────
 
 type AiState =
   | { status: "idle" }
@@ -99,6 +173,7 @@ function AiBuilderView({
 }) {
   const [prompt,  setPrompt]  = useState("");
   const [aiState, setAiState] = useState<AiState>({ status: "idle" });
+  const [isDelayed, setIsDelayed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { addItem } = useCart();
   const { user }    = useAuth();
@@ -108,16 +183,27 @@ function AiBuilderView({
     [components],
   );
 
+  /** Generează configurația — afișează skeleton rows în timpul așteptării */
   async function handleGenerate() {
     const q = prompt.trim();
     if (!q) return;
     setAiState({ status: "loading" });
+    setIsDelayed(false);
+    const delayTimer = setTimeout(() => setIsDelayed(true), DELAY_NOTICE_MS);
     try {
-      const res = await fetch("/api/ai/generate-build", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ prompt: q, availableProducts }),
-      });
+      const res = await fetchWithRetry(
+        "/api/ai/generate-build",
+        {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ prompt: q, availableProducts }),
+        },
+        {
+          maxRetries: 3,
+          retryDelayMs: 2000,
+          onRetry: () => setIsDelayed(true),
+        },
+      );
       if (!res.ok) throw new Error("Server error");
       const data = await res.json() as {
         build:       Record<string, ComponentProduct>;
@@ -126,6 +212,9 @@ function AiBuilderView({
       setAiState({ status: "done", build: data.build, explanation: data.explanation });
     } catch {
       setAiState({ status: "error", message: "Generarea configurației a eșuat. Încearcă din nou." });
+    } finally {
+      clearTimeout(delayTimer);
+      setIsDelayed(false);
     }
   }
 
@@ -140,71 +229,126 @@ function AiBuilderView({
     toast(added === products.length ? `${added} produse adăugate în coș!` : `${added} din ${products.length} adăugate.`);
   }
 
+  function handleSaveBuild() {
+    if (aiState.status !== "done") return;
+    const components: Build = {};
+    for (const slot of SLOTS) {
+      const p = aiState.build[slot.id];
+      if (p) components[slot.id] = p;
+    }
+    const saved: SavedBuild = {
+      id:           crypto.randomUUID(),
+      savedAt:      new Date().toISOString(),
+      totalPrice,
+      components,
+      aiGenerated:  true,
+    };
+    writeHistory([...readHistory(), saved]);
+    toast("Configurația a fost salvată în istoric!");
+  }
+
   const totalPrice = aiState.status === "done"
     ? Object.values(aiState.build).reduce((s, p) => s + (p?.price ?? 0), 0)
     : 0;
 
+  const PROMPT_CHIPS = [
+    "PC Gaming 1080p, buget 5000 lei",
+    "Calculator pentru editare video, buget nelimitat",
+    "Calculator pentru Office care este foarte silențios, buget minim",
+  ];
+
   return (
-    <div className="mx-auto flex w-[90%] max-w-[800px] flex-1 flex-col px-4 py-8 sm:px-6">
-      {/* Back */}
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-8 flex w-fit items-center gap-2 text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-900"
-      >
-        <ChevronLeft className="size-4" strokeWidth={2} aria-hidden />
-        Înapoi la meniu
-      </button>
+    <div className="mx-auto flex w-[90%] max-w-[900px] flex-1 flex-col px-4 py-8 sm:px-6">
+      {/* Card central rounded-3xl — logo Volt, titlu, textarea prompt */}
+      <div className="mx-auto w-full max-w-3xl rounded-3xl border border-gray-200 bg-white px-8 pt-8 pb-4 shadow-sm">
+        {/* Header */}
+        <div className="mb-6 text-center">
+          <div className="mb-3 flex justify-center">
+            <Image
+              src="/volt_logo.png"
+              alt="Volt"
+              width={56}
+              height={56}
+              className="size-14 object-contain"
+            />
+          </div>
+          <h1 className="text-2xl font-extrabold tracking-tight text-neutral-900 sm:text-3xl">
+            Configurează cu Volt
+          </h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-neutral-500">
+            Salut! Sunt Volt. Spune-mi ce buget ai și la ce vei folosi calculatorul,
+            iar eu voi alege cele mai bune componente pentru tine.
+          </p>
+        </div>
 
-      {/* Header */}
-      <div className="mb-8 text-center">
-        <h1 className="text-2xl font-extrabold tracking-tight text-neutral-900 sm:text-3xl">
-          Creare calculator cu AI
-        </h1>
-        <p className="mt-1.5 text-sm text-neutral-500">
-          Descrie ce vrei să faci cu PC-ul tău și AI-ul alege componentele potrivite.
-        </p>
-      </div>
+        {/* ── Prompt area ── */}
+        <div>
+          {/* Chip-uri prompt — pill rounded-full, border verde când e selectat */}
+          <div className="mb-4 flex flex-col gap-3">
+            {PROMPT_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                onClick={() => setPrompt(chip)}
+                className={`rounded-full border px-5 py-3 text-base font-medium transition-colors ${
+                  prompt === chip
+                    ? "border-[#22624a] bg-[#edf5f1] text-[#22624a]"
+                    : "border-gray-200 bg-white text-neutral-600 hover:border-[#22624a] hover:bg-[#edf5f1] hover:text-[#22624a]"
+                }`}
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
 
-      {/* ── Prompt area (always visible) ── */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <label htmlFor="ai-prompt" className="mb-2 block text-sm font-semibold text-neutral-700">
-          Descrie utilizarea dorită
-        </label>
-        <textarea
-          ref={textareaRef}
-          id="ai-prompt"
-          rows={3}
-          placeholder="Ex: Vreau un PC pentru gaming la 1080p cu un buget de 3000 lei, sau un calculator pentru birou și navigare web."
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleGenerate();
-          }}
-          className="w-full resize-none rounded-xl border border-neutral-200 px-4 py-3 text-sm text-neutral-900 placeholder:text-neutral-400 outline-none transition-shadow focus:border-[#22624a] focus:ring-2 focus:ring-[#22624a]/20"
-        />
-        <div className="mt-3 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={!prompt.trim() || aiState.status === "loading"}
-            className="flex items-center gap-2 rounded-xl bg-[#22624a] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1a4d3a] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
-          >
-            <SendHorizonal className="size-4 shrink-0" strokeWidth={2} aria-hidden />
-            Generează
-          </button>
+          <textarea
+            ref={textareaRef}
+            id="ai-prompt"
+            rows={2}
+            placeholder="Descrie aici la ce vei folosi noul tău calculator și care este bugetul alocat..."
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleGenerate();
+            }}
+            className="w-full resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 outline-none transition-colors focus:border-[#22624a] focus:bg-white focus:ring-1 focus:ring-[#22624a]"
+          />
+
+          {/* Rând acțiuni: Înapoi (outline) + Generează (verde solid) */}
+          <div className="mt-4 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={onBack}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              Înapoi la meniu
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={!prompt.trim() || aiState.status === "loading"}
+              className="rounded-xl bg-[#22624a] px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#1a4d3a] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
+            >
+              Generează cu Volt
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── Loading ── */}
+      {/* Stare loading — fundal #edf5f1, skeleton animate-pulse per slot */}
       {aiState.status === "loading" && (
         <div className="mt-6 flex flex-col items-center gap-5 rounded-2xl border border-[#a8d7c5] bg-[#edf5f1] p-8 text-center">
           <Loader2 className="size-10 animate-spin text-[#22624a]" strokeWidth={1.75} aria-hidden />
           <div>
             <p className="text-sm font-semibold text-[#22624a]">AI-ul generează configurația ideală…</p>
             <p className="mt-1 text-xs text-[#379b72]">Analizăm componentele disponibile și cerințele tale.</p>
+            {isDelayed && (
+              <p className="mt-2 text-xs text-neutral-500">
+                Serverele sunt aglomerate. Durează puțin mai mult, te rugăm să aștepți...
+              </p>
+            )}
           </div>
-          {/* skeleton rows */}
+          {/* Skeleton placeholder */}
           <div className="w-full space-y-3">
             {SLOTS.map((s) => (
               <div key={s.id} className="flex items-center gap-3 rounded-xl border border-[#d4ebe2] bg-white px-4 py-3">
@@ -229,14 +373,14 @@ function AiBuilderView({
       {/* ── Result ── */}
       {aiState.status === "done" && (
         <div className="mt-6 flex flex-col gap-4">
-          {/* explanation */}
+          {/* Explicație AI — banner verde deschis (#edf5f1) */}
           {aiState.explanation && (
             <div className="rounded-xl border border-[#a8d7c5] bg-[#edf5f1] px-5 py-4">
               <p className="text-sm leading-relaxed text-[#1a4d3a] text-justify">{aiState.explanation}</p>
             </div>
           )}
 
-          {/* component list */}
+          {/* Tabel componente — rânduri cu icon colorat + preț aliniat dreapta */}
           <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
             {SLOTS.map((slot, i) => {
               const p = aiState.build[slot.id] as ComponentProduct | undefined;
@@ -266,22 +410,30 @@ function AiBuilderView({
               );
             })}
 
-            {/* total */}
+            {/* Footer tabel — total estimat, font extrabold verde */}
             <div className="flex items-center justify-between border-t-2 border-neutral-200 bg-neutral-50 px-5 py-4">
               <span className="text-sm font-bold text-neutral-700">Total estimat</span>
               <span className="text-xl font-extrabold text-[#22624a]">{formatPrice(totalPrice)}</span>
             </div>
           </div>
 
-          {/* action buttons */}
-          <div className="flex flex-col gap-3 sm:flex-row">
+          {/* 3 butoane egale: coș (verde) / salvează / reface (outline) */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <button
               type="button"
               onClick={handleAddToCart}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#22624a] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1a4d3a] focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
+              className="flex items-center justify-center gap-2 rounded-xl bg-[#22624a] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1a4d3a] focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
             >
               <ShoppingCart className="size-4 shrink-0" strokeWidth={2} aria-hidden />
               Adaugă în coș
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveBuild}
+              className="flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
+            >
+              <Bookmark className="size-4 shrink-0" strokeWidth={2} aria-hidden />
+              Salvează
             </button>
             <button
               type="button"
@@ -289,7 +441,7 @@ function AiBuilderView({
                 setAiState({ status: "idle" });
                 setTimeout(() => textareaRef.current?.focus(), 50);
               }}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-[#22624a] bg-white px-5 py-3 text-sm font-semibold text-[#22624a] transition-colors hover:bg-[#edf5f1] focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
+              className="flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
             >
               <RotateCcw className="size-4 shrink-0" strokeWidth={2} aria-hidden />
               Reface configurația
@@ -301,7 +453,7 @@ function AiBuilderView({
   );
 }
 
-// ─── Saved builds section (inline, used directly in MenuView) ────────────────
+// ─── Grid „Configurații salvate” — carduri clickable cu chip-uri componente ──
 
 function SavedBuildsSection({
   onLoad,
@@ -363,18 +515,30 @@ function SavedBuildsSection({
                     <p className="mt-0.5 text-lg font-bold text-neutral-900">{formatPrice(saved.totalPrice)}</p>
                     <p className="text-xs text-neutral-500">{products.length} din {SLOTS.length} componente</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      deleteSaved(saved.id);
-                    }}
-                    aria-label="Șterge configurația"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-neutral-200 text-neutral-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-500"
-                  >
-                    <Trash2 className="size-4" strokeWidth={2} aria-hidden />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {saved.aiGenerated && (
+                      <Image
+                        src="/volt_logo.png"
+                        alt="Generat cu Volt"
+                        width={20}
+                        height={20}
+                        className="size-5 object-contain"
+                        title="Configurare generată cu Volt"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        deleteSaved(saved.id);
+                      }}
+                      aria-label="Șterge configurația"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-neutral-200 text-neutral-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-500"
+                    >
+                      <Trash2 className="size-4" strokeWidth={2} aria-hidden />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex flex-col items-start gap-2">
@@ -402,7 +566,7 @@ function SavedBuildsSection({
   );
 }
 
-// ─── Inline product picker ────────────────────────────────────────────────────
+// ─── Selector inline de produse per slot ──────────────────────────────────────
 
 function InlinePicker({
   slot,
@@ -427,7 +591,7 @@ function InlinePicker({
 
   return (
     <div className="border-t border-[#d4ebe2] bg-[#edf5f1]/40 px-4 pb-4 pt-3">
-      {/* Search bar */}
+      {/* Căutare în lista de componente */}
       <div className="mb-3 flex items-center gap-2">
         <input
           type="search"
@@ -447,7 +611,7 @@ function InlinePicker({
         </button>
       </div>
 
-      {/* Product list */}
+      {/* Lista filtrată de produse */}
       {filtered.length === 0 ? (
         <p className="py-6 text-center text-sm text-neutral-400">
           {search ? "Niciun rezultat." : "Nicio componentă disponibilă."}
@@ -467,7 +631,7 @@ function InlinePicker({
                       : "border-neutral-200 bg-white hover:border-[#a8d7c5] hover:bg-neutral-50"
                   }`}
                 >
-                  {/* Thumbnail */}
+                  {/* Miniatură produs */}
                   <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-neutral-100 bg-white p-1">
                     {product.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -497,7 +661,7 @@ function InlinePicker({
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Componentă principală — configurare manuală ──────────────────────────────
 
 type CompatibilityState =
   | { status: "idle" }
@@ -511,11 +675,12 @@ export default function PcBuilderClient({ components }: Props) {
   const [expandedSlot, setExpandedSlot] = useState<SlotId | null>(null);
   const [aiModal,      setAiModal]      = useState(false);
   const [aiState,      setAiState]      = useState<CompatibilityState>({ status: "idle" });
+  const [isCompatibilityDelayed, setIsCompatibilityDelayed] = useState(false);
 
   const { addItem } = useCart();
   const { user }    = useAuth();
 
-  // Pre-group products by subcategory so each slot picker doesn't re-filter all components
+  // Grupează produsele pe subcategorie pentru picker-ul fiecărui slot
   const productsBySlot = useMemo<Record<SlotId, ComponentProduct[]>>(() => {
     const map = {} as Record<SlotId, ComponentProduct[]>;
     for (const slot of SLOTS) map[slot.id] = [];
@@ -547,15 +712,16 @@ export default function PcBuilderClient({ components }: Props) {
     setExpandedSlot(null);
   }
 
+  /** Trimite configurația la POST /api/ai/check-compatibility și deschide modalul Volt */
   async function handleCheckCompatibility() {
     const selectedComponents = SLOTS
       .filter((s) => build[s.id])
       .map((s) => {
         const p = build[s.id]!;
         return { id: p.id, name: p.name, price: p.price, subcategory: s.id };
-      });
+      }); // cpu, gpu, ram, placa_baza, ...
 
-    // Pass the full store inventory so Gemini can suggest replacements from real products
+    // Trimite și catalogul complet — Gemini poate sugera înlocuiri din stoc real
     const availableProducts = components.map((c) => ({
       id:          c.id,
       name:        c.name,
@@ -565,13 +731,23 @@ export default function PcBuilderClient({ components }: Props) {
 
     setAiModal(true);
     setAiState({ status: "loading" });
+    setIsCompatibilityDelayed(false);
+    const delayTimer = setTimeout(() => setIsCompatibilityDelayed(true), DELAY_NOTICE_MS);
 
     try {
-      const res = await fetch("/api/ai/check-compatibility", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ selectedComponents, availableProducts }),
-      });
+      const res = await fetchWithRetry(
+        "/api/ai/check-compatibility",
+        {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ selectedComponents, availableProducts }),
+        },
+        {
+          maxRetries: 3,
+          retryDelayMs: 2000,
+          onRetry: () => setIsCompatibilityDelayed(true),
+        },
+      );
 
       if (!res.ok) throw new Error("Server error");
 
@@ -579,6 +755,9 @@ export default function PcBuilderClient({ components }: Props) {
       setAiState({ status: "done", analysis: data.analysis });
     } catch {
       setAiState({ status: "error", message: "Analiza a eșuat. Încearcă din nou." });
+    } finally {
+      clearTimeout(delayTimer);
+      setIsCompatibilityDelayed(false);
     }
   }
 
@@ -593,7 +772,7 @@ export default function PcBuilderClient({ components }: Props) {
     toast("Configurația a fost salvată în istoric!");
   }, [build]);
 
-  // Cart only — no history save
+  // Adaugă toate componentele selectate în coș (fără salvare în istoric)
   const handleAddToCart = useCallback(async () => {
     const products = Object.values(build).filter(Boolean) as ComponentProduct[];
     let added = 0;
@@ -614,7 +793,7 @@ export default function PcBuilderClient({ components }: Props) {
     setView("manual");
   }
 
-  // ── Routing ─────────────────────────────────────────────────────────────────
+  // ── Rutare între meniu / AI / manual ────────────────────────────────────────
 
   if (view === "ai") {
     return (
@@ -640,11 +819,11 @@ export default function PcBuilderClient({ components }: Props) {
             Configurare manuală
           </h1>
           <p className="mt-0.5 text-sm text-neutral-500">
-            Alege componentele și verifică compatibilitatea cu AI
+            Alege componentele și verifică compatibilitatea cu Volt
           </p>
         </div>
 
-        {/* Progress bar */}
+        {/* Bară progres — sloturi completate */}
         <div className="mt-6 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="font-medium text-neutral-700">
@@ -667,7 +846,7 @@ export default function PcBuilderClient({ components }: Props) {
         </div>
       </div>
 
-      {/* ── Slot list ── */}
+      {/* Lista sloturilor (CPU, GPU, RAM, …) */}
       <div className="flex flex-col gap-3">
         {SLOTS.map((slot) => {
           const selected   = build[slot.id];
@@ -685,7 +864,7 @@ export default function PcBuilderClient({ components }: Props) {
                   : "border-neutral-200"
               }`}
             >
-              {/* ── Slot row ── */}
+              {/* Rând slot — icon, info, acțiuni */}
               <div className="flex items-center gap-4 p-4">
                 {/* Icon */}
                 <div
@@ -756,7 +935,7 @@ export default function PcBuilderClient({ components }: Props) {
                 </div>
               </div>
 
-              {/* ── Inline picker (expanded) ── */}
+              {/* Picker expandat — alegere produs din subcategorie */}
               {isExpanded && (
                 <InlinePicker
                   slot={slot}
@@ -771,7 +950,7 @@ export default function PcBuilderClient({ components }: Props) {
         })}
       </div>
 
-      {/* ── Footer ── */}
+      {/* Footer — reset, compatibilitate Volt, salvare, coș */}
       <div className="mt-8 flex flex-col gap-3">
         <p className="text-sm text-neutral-500">
           {isComplete
@@ -783,9 +962,9 @@ export default function PcBuilderClient({ components }: Props) {
           <button
             type="button"
             onClick={() => setView("menu")}
-            className="rounded-lg border border-neutral-200 px-4 py-2.5 text-sm font-medium text-neutral-600 transition-colors hover:bg-neutral-50"
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
           >
-            Inapoi
+            Înapoi la meniu
           </button>
 
           <button
@@ -806,7 +985,7 @@ export default function PcBuilderClient({ components }: Props) {
             className="flex items-center gap-2 rounded-lg border border-[#a8d7c5] bg-[#edf5f1] px-4 py-2.5 text-sm font-semibold text-[#1a4d3a] transition-colors hover:bg-[#d4ebe2] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Sparkles className="size-4 shrink-0" strokeWidth={2} aria-hidden />
-            Verifică compatibilitate (AI)
+            Verifică compatibilitatea cu Volt
           </button>
 
 
@@ -830,80 +1009,94 @@ export default function PcBuilderClient({ components }: Props) {
         </div>
       </div>
 
-      {/* ── AI Compatibility Modal ── */}
-      <Dialog open={aiModal} onOpenChange={(open) => { if (!open) setAiModal(false); }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span className="flex size-8 items-center justify-center rounded-lg bg-[#22624a] text-white">
-                <Sparkles className="size-4" strokeWidth={2} aria-hidden />
-              </span>
-              Verificare compatibilitate AI
+      {/* Modal raport compatibilitate Volt */}
+      <Dialog open={aiModal} onOpenChange={(open) => {
+        if (!open) {
+          setAiModal(false);
+          setIsCompatibilityDelayed(false);
+        }
+      }}>
+        <DialogContent className="max-w-lg overflow-hidden p-0">
+          <DialogHeader className="relative flex min-h-[4.5rem] items-center justify-center border-b border-neutral-200 bg-neutral-50 !p-0 px-6 py-4 pr-12">
+            <Image
+              src="/volt_logo.png"
+              alt="Volt"
+              width={40}
+              height={40}
+              className="absolute left-6 top-1/2 size-10 -translate-y-1/2 object-contain"
+            />
+            <DialogTitle className="text-lg font-semibold text-neutral-900">
+              Verificare Volt
             </DialogTitle>
           </DialogHeader>
 
-          {/* Loading */}
+          {/* Încărcare */}
           {aiState.status === "loading" && (
             <div className="flex flex-col items-center gap-4 px-6 py-10 text-center">
               <Loader2 className="size-10 animate-spin text-[#22624a]" strokeWidth={1.75} aria-hidden />
               <p className="text-sm font-medium text-neutral-600">
-                AI analizează build-ul tău…
+                Volt analizează build-ul tău...
               </p>
               <p className="text-xs text-neutral-400">Acest proces durează câteva secunde.</p>
+              {isCompatibilityDelayed && (
+                <p className="text-xs text-neutral-500">
+                  Serverele sunt aglomerate. Durează puțin mai mult, te rugăm să aștepți...
+                </p>
+              )}
             </div>
           )}
 
-          {/* Error */}
+          {/* Eroare */}
           {aiState.status === "error" && (
-            <div className="px-6 py-6 text-center">
+            <div className="flex flex-col items-center gap-4 px-6 py-8 text-center">
               <p className="text-sm font-medium text-red-600">{aiState.message}</p>
-            </div>
-          )}
-
-          {/* Result */}
-          {aiState.status === "done" && (
-            <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
-              <div className="prose prose-sm prose-neutral max-w-none">
-                {aiState.analysis.split("\n").map((line, i) => {
-                  if (!line.trim()) return <div key={i} className="h-2" />;
-                  // Bold **text**
-                  const rendered = line.replace(
-                    /\*\*(.+?)\*\*/g,
-                    (_, m) => `<strong>${m}</strong>`,
-                  );
-                  return (
-                    <p
-                      key={i}
-                      className="text-sm leading-relaxed text-justify text-neutral-700"
-                      // eslint-disable-next-line react/no-danger
-                      dangerouslySetInnerHTML={{ __html: rendered }}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {aiState.status !== "loading" && (
-            <DialogFooter>
               <button
                 type="button"
-                onClick={() => setAiModal(false)}
-                className="rounded-lg border border-neutral-200 px-5 py-2 text-sm font-semibold text-neutral-700 transition-colors hover:bg-neutral-50"
+                onClick={handleCheckCompatibility}
+                className="flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-5 py-2 text-sm font-semibold text-neutral-700 transition-colors hover:bg-neutral-50"
               >
-                Închide
+                <Sparkles className="size-4" strokeWidth={2} aria-hidden />
+                Încearcă din nou
               </button>
-              {aiState.status === "error" && (
-                <button
-                  type="button"
-                  onClick={handleCheckCompatibility}
-                  className="flex items-center gap-2 rounded-lg bg-[#22624a] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1a4d3a]"
-                >
-                  <Sparkles className="size-4" strokeWidth={2} aria-hidden />
-                  Încearcă din nou
-                </button>
-              )}
-            </DialogFooter>
+            </div>
+          )}
+
+          {/* Rezultat analiză */}
+          {aiState.status === "done" && (
+            <div className="max-h-[60vh] overflow-y-auto bg-white px-6 py-6">
+              {(() => {
+                const { items, conclusion } = parseCompatibilityReport(aiState.analysis);
+
+                return (
+                  <>
+                    <ul className="space-y-4">
+                      {items.map((item, idx) => (
+                        <li key={idx}>
+                          <p className="text-sm font-bold leading-snug text-neutral-900 sm:text-base">
+                            <span aria-hidden>{item.icon}</span> {item.label}
+                          </p>
+                          <p className="mt-0.5 pl-5 text-sm leading-snug text-gray-600 sm:pl-6">
+                            - {item.detail}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {conclusion && (conclusion.score || conclusion.note) && (
+                      <div className="mt-6 border-t border-neutral-200 pt-4">
+                        <p className="text-sm font-bold text-neutral-900">Concluzie</p>
+                        {conclusion.score && (
+                          <p className="mt-1 text-sm text-gray-600">{conclusion.score}</p>
+                        )}
+                        {conclusion.note && (
+                          <p className="mt-1 text-sm text-gray-600">{conclusion.note}</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           )}
         </DialogContent>
       </Dialog>
@@ -911,11 +1104,10 @@ export default function PcBuilderClient({ components }: Props) {
   );
 }
 
-// ─── Menu view ────────────────────────────────────────────────────────────────
+// ─── Vedere meniu (alegere mod configurare) ───────────────────────────────────
 
 type MenuCard = {
   id:       View;
-  icon:     React.ElementType;
   label:    string;
   subtitle: string;
 };
@@ -923,36 +1115,42 @@ type MenuCard = {
 const ACTION_CARDS: MenuCard[] = [
   {
     id:       "manual",
-    icon:     Wrench,
-    label:    "Creare calculator",
-    subtitle: "Selectează manual fiecare componentă și construiește configurația ideală.",
+    label:    "Configurare singură",
+    subtitle: "Selectează manual fiecare componentă și construiește configurația pas cu pas.",
   },
   {
     id:       "ai",
-    icon:     Bot,
-    label:    "Creare calculator cu AI",
-    subtitle: "Descrie ce vrei să faci cu PC-ul tău și AI-ul alege componentele potrivite.",
+    label:    "Configurare cu Volt",
+    subtitle: "Descrie ce vrei să faci cu calculatorul tău și Volt alege componentele potrivite.",
   },
 ];
 
 function MenuCard({ card, onSelect }: { card: MenuCard; onSelect: (v: View) => void }) {
-  const { id, icon: Icon, label, subtitle } = card;
+  const { id, label, subtitle } = card;
+  const isAi = id === "ai";
+
   return (
     <button
       type="button"
       onClick={() => onSelect(id)}
-      className="group relative flex flex-col items-start gap-4 rounded-2xl bg-[#22624a] p-6 text-left shadow-md transition-all duration-200 hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2"
+      className={`group flex h-full flex-col items-start rounded-xl p-6 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#22624a] focus-visible:ring-offset-2 ${
+        isAi
+          ? "border border-[#22624a] bg-[#edf5f1]/40 hover:bg-[#edf5f1]/70"
+          : "border border-gray-200 bg-gray-50/50 hover:border-[#22624a]/50 hover:bg-gray-50"
+      }`}
     >
-      <span className="flex size-12 items-center justify-center rounded-xl bg-white/20">
-        <Icon className="size-6 text-white" strokeWidth={1.75} aria-hidden />
-      </span>
-      <div>
-        <p className="text-lg font-bold leading-snug text-white">{label}</p>
-        <p className="mt-1 text-sm leading-relaxed text-[#d4ebe2]">{subtitle}</p>
+      <div className="flex-1">
+        <p className="text-lg font-bold text-gray-900">{label}</p>
+        <p className="mt-2 text-sm leading-relaxed text-gray-500">{subtitle}</p>
       </div>
-      <span className="mt-auto flex items-center gap-1.5 text-sm font-semibold text-white">
+
+      <span className="mt-4 flex items-center gap-1 font-semibold text-[#22624a] transition-colors group-hover:text-[#1a4d3a]">
         Începe
-        <ChevronRight className="size-4 transition-transform duration-150 group-hover:translate-x-0.5" strokeWidth={2.5} aria-hidden />
+        <ChevronRight
+          className="size-4 transition-transform duration-150 group-hover:translate-x-0.5"
+          strokeWidth={2.5}
+          aria-hidden
+        />
       </span>
     </button>
   );
@@ -967,24 +1165,41 @@ function MenuView({
 }) {
   return (
     <div className="mx-auto w-[90%] max-w-[1100px] flex-1 px-4 py-8 sm:px-6">
-      {/* Header */}
       <div className="mb-10 text-center">
         <h1 className="text-3xl font-extrabold tracking-tight text-neutral-900 sm:text-4xl">
           Configurează-ți propriul calculator
         </h1>
-        <p className="mt-2 text-base text-neutral-500">
-          Alege una dintre cele 2 opțiuni
-        </p>
       </div>
 
-      {/* Two main action cards — centred 2-column grid */}
-      <div className="mx-auto grid max-w-4xl grid-cols-1 gap-5 md:grid-cols-2">
-        {ACTION_CARDS.map((card) => (
-          <MenuCard key={card.id} card={card} onSelect={onSelect} />
-        ))}
+      <div className="mx-auto max-w-4xl rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+        <div className="mb-6 flex flex-col gap-4 border-b border-gray-200 pb-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">
+              Alege metoda de configurare
+            </h2>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-500">
+              Poți configura calculatorul singur, componentă cu componentă, sau poți
+              lăsa asistentul Volt să te ghideze și să aleagă piesele potrivite pentru tine.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center justify-center sm:justify-end">
+            <Image
+              src="/volt_logo.png"
+              alt="Volt"
+              width={56}
+              height={56}
+              className="size-14 object-contain"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {ACTION_CARDS.map((card) => (
+            <MenuCard key={card.id} card={card} onSelect={onSelect} />
+          ))}
+        </div>
       </div>
 
-      {/* Saved configurations list — rendered inline below the action cards */}
       <SavedBuildsSection onLoad={onLoad} />
     </div>
   );

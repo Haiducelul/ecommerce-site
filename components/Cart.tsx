@@ -1,5 +1,15 @@
 "use client";
 
+/**
+ * Panoul coșului de cumpărături — Dialog modal (shadcn/ui).
+ *
+ * Structură vizuală:
+ *   - Header fix: titlu + badge verde cu număr articole
+ *   - Body scrollabil: listă produse sau empty state centrat
+ *   - Footer fix: total + CTA verde „Finalizează” + buton „Golește”
+ * Deschis din Navbar; fundal semi-transparent cu backdrop-blur.
+ */
+
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useCloseOnRouteChange } from "@/hooks/use-overlay-guards";
@@ -22,6 +32,7 @@ type CartProps = {
 export default function Cart({ open, onOpenChange }: CartProps) {
   const router = useRouter();
 
+  // Închide modalul automat la schimbarea paginii
   const handleClose = useCallback(() => onOpenChange(false), [onOpenChange]);
   useCloseOnRouteChange(handleClose);
   const { items, removeItem, updateQuantity, clearCart, totalPrice } = useCart();
@@ -52,7 +63,7 @@ export default function Cart({ open, onOpenChange }: CartProps) {
       <DialogContent
         className="flex w-full max-w-lg max-h-[80vh] flex-col overflow-hidden rounded-xl border border-gray-200/50 bg-white/85 p-0 shadow-2xl backdrop-blur-md"
       >
-        {/* Header — fixed */}
+        {/* Antet fix — titlu + badge numeric verde brand */}
         <DialogHeader className="shrink-0 space-y-0 border-b border-neutral-200/60 px-6 py-4 pr-12">
           <DialogTitle className="flex items-center gap-2 text-xl">
             Coșul tău
@@ -64,10 +75,11 @@ export default function Cart({ open, onOpenChange }: CartProps) {
           </DialogTitle>
         </DialogHeader>
 
-        {/* Body — scrollable */}
+        {/* Conținut scrollabil — empty state sau listă produse */}
         <div className="min-h-0 flex-1 overflow-y-auto py-4">
           {isEmpty ? (
             <div className="flex min-h-[200px] flex-col items-center justify-center gap-4 px-6 text-center">
+              {/* Stare goală: icon coș în cerc gri + mesaj centrat */}
               <div className="rounded-full bg-neutral-100/80 p-6">
                 <ShoppingCart className="size-10 text-neutral-400" strokeWidth={1.5} />
               </div>
@@ -82,6 +94,7 @@ export default function Cart({ open, onOpenChange }: CartProps) {
             <ul className="flex flex-col divide-y divide-neutral-200/60 px-6">
               {items.map((item) => (
                 <li key={item.id} className="flex items-start gap-4 py-4">
+                  {/* Miniatură produs — 64×64, fundal întunecat */}
                   <div className="size-16 shrink-0 overflow-hidden rounded-lg bg-neutral-950">
                     {item.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -101,6 +114,7 @@ export default function Cart({ open, onOpenChange }: CartProps) {
                       {formatPrice(item.price)}
                     </p>
 
+                    {/* Controale cantitate — butoane +/- mici, border subtil */}
                     <div className="mt-1 flex items-center gap-2">
                       <button
                         type="button"
@@ -125,6 +139,7 @@ export default function Cart({ open, onOpenChange }: CartProps) {
                     </div>
                   </div>
 
+                  {/* Subtotal rând + buton ștergere (hover roz) */}
                   <div className="flex flex-col items-end gap-2">
                     <p className="text-sm font-bold text-neutral-900">
                       {formatPrice(item.price * item.quantity)}
@@ -144,7 +159,7 @@ export default function Cart({ open, onOpenChange }: CartProps) {
           )}
         </div>
 
-        {/* Footer — fixed */}
+        {/* Subsol fix — total + acțiuni (vizibil doar dacă coșul nu e gol) */}
         {!isEmpty && (
           <div className="shrink-0 border-t border-neutral-200/60 px-6 py-4">
             <div className="flex w-full items-center justify-between">
@@ -155,6 +170,7 @@ export default function Cart({ open, onOpenChange }: CartProps) {
             </div>
 
             <div className="mt-3 flex w-full flex-row gap-2">
+              {/* CTA principal verde + buton secundar outline */}
               <button
                 type="button"
                 onClick={handleCheckout}

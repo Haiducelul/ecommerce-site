@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { Loader2, MapPin, PackageCheck, Phone, Download } from "lucide-react";
+import { Loader2, PackageCheck, Download } from "lucide-react";
 import { toast } from "sonner";
 import { formatPrice } from "@/lib/products";
 import {
@@ -11,11 +11,12 @@ import {
   getStatusDotClass,
   type OrderStatus,
 } from "@/lib/orderStatus";
-import { generateTestPDF } from "@/utils/generatePDF";
+import { generatePDF } from "@/utils/generatePDF";
 
 type AdminOrderItem = {
   name: string;
   quantity: number;
+  unit_price: string;
 };
 
 type AdminOrder = {
@@ -320,7 +321,7 @@ export default function OrdersPageClient() {
                             <div className="mt-4 flex justify-end">
                               <button
                                 type="button"
-                                onClick={() => generateTestPDF(order.id)}
+                                onClick={() => generatePDF(order)}
                                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-[#a8d7c5] hover:bg-[#edf5f1] hover:text-[#22624a]"
                               >
                                 <Download className="size-4" aria-hidden />

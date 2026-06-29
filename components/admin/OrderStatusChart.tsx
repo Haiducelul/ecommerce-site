@@ -91,13 +91,8 @@ export default function OrderStatusChart() {
               axisLine={{ stroke: "#e2e8f0" }}
             />
             <Tooltip
-              contentStyle={{
-                backgroundColor: "#ffffff",
-                border: "1px solid #e2e8f0",
-                borderRadius: "8px",
-                boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-              }}
-              itemStyle={{ color: "#1e293b" }}
+              cursor={{ fill: '#f3f4f6' }}
+              formatter={(value) => [value, 'Total']}
             />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={50}>
               {data.map((entry, index) => (

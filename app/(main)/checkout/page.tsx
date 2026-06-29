@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowLeft, ShoppingBag, Loader2, UserCircle, CreditCard, Banknote } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ShoppingBag,
+  Loader2,
+  UserCircle,
+  CreditCard,
+  Banknote,
+} from "lucide-react";
 import Link from "next/link";
 
 import { Input } from "@/components/ui/input";
@@ -23,20 +31,9 @@ import { useCart } from "@/hooks/use-cart";
 import { useAuth } from "@/store/useAuth";
 import { formatPrice } from "@/lib/products";
 
+// ─── Types & constants ────────────────────────────────────────────────────────
+
 type PaymentMethod = "cash" | "card";
-
-const checkoutSchema = z.object({
-  fullName: z.string().min(3, { message: "Numele trebuie să aibă cel puțin 3 caractere." }),
-  email: z.string().email({ message: "Adresă de email invalidă." }),
-  phone: z
-    .string()
-    .min(10, { message: "Număr de telefon invalid." })
-    .regex(/^[0-9+\s()-]+$/, { message: "Număr de telefon invalid." }),
-  address: z.string().min(5, { message: "Adresa trebuie să aibă cel puțin 5 caractere." }),
-  city: z.string().min(2, { message: "Orașul trebuie să aibă cel puțin 2 caractere." }),
-});
-
-type CheckoutValues = z.infer<typeof checkoutSchema>;
 
 const PAYMENT_OPTIONS: {
   value: PaymentMethod;
@@ -45,51 +42,81 @@ const PAYMENT_OPTIONS: {
   icon: typeof Banknote;
 }[] = [
   {
-    value:       "cash",
-    label:       "Ramburs la livrare",
-    description: "Plata se efectuează în numerar la momentul livrării.",
-    icon:        Banknote,
+    value:        "cash",
+    label:        "Ramburs la curier",
+    description:  "Plata se efectuează în numerar la momentul livrării.",
+    icon:         Banknote,
   },
   {
-    value:       "card",
-    label:       "Plata cu cardul",
-    description: "Plata se procesează securizat prin Stripe Checkout.",
-    icon:        CreditCard,
+    value:        "card",
+    label:        "Plată cu cardul",
+    description:  "Plata se procesează securizat prin Stripe Checkout.",
+    icon:         CreditCard,
   },
 ];
 
-export default function CheckoutPage() {
-  const router = useRouter();
-  const { user } = useAuth();
-  const { items, totalPrice } = useCart();
+const FORM_STORAGE_KEY = "checkout_form_data";
+
+const checkoutSchema = z.object({
+  fullName: z.string().min(3, { message: "Numele trebuie să aibă cel puțin 3 caractere." }),
+  email:    z.string().email({ message: "Adresă de email invalidă." }),
+  phone:    z
+    .string()
+    .min(10, { message: "Număr de telefon invalid." })
+    .regex(/^[0-9+\s()-]+$/, { message: "Număr de telefon invalid." }),
+  address:  z.string().min(5, { message: "Adresa trebuie să aibă cel puțin 5 caractere." }),
+  city:     z.string().min(2, { message: "Orașul trebuie să aibă cel puțin 2 caractere." }),
+});
+
+type CheckoutValues = z.infer<typeof checkoutSchema>;
+
+// ─── Inner component (uses useSearchParams) ───────────────────────────────────
+
+function CheckoutContent() {
+  const searchParams    = useSearchParams();
+  const paymentFailed   = searchParams.get("payment_failed") === "1";
+  const router          = useRouter();
+  const { user }        = useAuth();
+  const { items, totalPrice, clearCart } = useCart();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
 
-  const total = totalPrice();
+  const total   = totalPrice();
   const isEmpty = items.length === 0;
+
+  // ── Form defaults: try to restore saved data first ──
+  const savedRaw    = typeof window !== "undefined" ? sessionStorage.getItem(FORM_STORAGE_KEY) : null;
+  const savedValues: Partial<CheckoutValues> = savedRaw ? JSON.parse(savedRaw) : {};
 
   const form = useForm<CheckoutValues>({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
-      fullName: user?.name ?? "",
-      email: user?.email ?? "",
-      phone: "",
-      address: "",
-      city: "",
+      fullName: savedValues.fullName ?? user?.name ?? "",
+      email:    savedValues.email    ?? user?.email ?? "",
+      phone:    savedValues.phone    ?? "",
+      address:  savedValues.address  ?? "",
+      city:     savedValues.city     ?? "",
     },
   });
 
+  // Sync auth user into form (only for empty fields)
   useEffect(() => {
-    if (user) {
-      form.setValue("fullName", user.name);
-      form.setValue("email", user.email);
-    }
+    if (!user) return;
+    if (!form.getValues("fullName")) form.setValue("fullName", user.name);
+    if (!form.getValues("email"))    form.setValue("email",    user.email);
   }, [user, form]);
 
   const { isSubmitting } = form.formState;
 
-  const onSubmit = async (values: CheckoutValues) => {
-    toast("Comanda se procesează...");
+  // ── Persist form values to sessionStorage on every change ──
+  useEffect(() => {
+    const subscription = form.watch((values) => {
+      sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(values));
+    });
+    return () => subscription.unsubscribe();
+  }, [form]);
 
+  // ── Submit ────────────────────────────────────────────────────────────────
+  const onSubmit = async (values: CheckoutValues) => {
     const cartPayload = items.map((item) => ({
       product_id: item.id,
       quantity:   item.quantity,
@@ -104,36 +131,18 @@ export default function CheckoutPage() {
     };
 
     try {
-      const res = await fetch("/api/checkout", {
-        method:  "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          items:          cartPayload,
-          payment_method: paymentMethod,
-          ...shippingPayload,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast(data.error ?? "Plasarea comenzii a eșuat.");
-        return;
-      }
-
-      const orderId = data.order_id as string;
-
+      // ── Card payment: go straight to Stripe, order created by webhook ──
       if (paymentMethod === "card") {
+        toast("Se pregătește redirecționarea către plată...");
+
+        // Save form before leaving the page so we can restore if they cancel
+        sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(values));
+
         const stripeRes = await fetch("/api/checkout/stripe", {
-          method:  "POST",
+          method:      "POST",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({
-            orderId,
-            items: cartPayload,
-            ...shippingPayload,
-          }),
+          headers:     { "Content-Type": "application/json" },
+          body:        JSON.stringify({ items: cartPayload, ...shippingPayload }),
         });
 
         const stripeData = await stripeRes.json();
@@ -147,9 +156,33 @@ export default function CheckoutPage() {
         return;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      // ── Cash payment: create order immediately ──
+      toast("Comanda se procesează...");
+
+      const res = await fetch("/api/checkout", {
+        method:      "POST",
+        credentials: "include",
+        headers:     { "Content-Type": "application/json" },
+        body:        JSON.stringify({
+          items:          cartPayload,
+          payment_method: "cash",
+          ...shippingPayload,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast(data.error ?? "Plasarea comenzii a eșuat.");
+        return;
+      }
+
+      // Clear persisted form data on success
+      sessionStorage.removeItem(FORM_STORAGE_KEY);
+
+      await new Promise((resolve) => setTimeout(resolve, 600));
       toast("Comandă acceptată!");
-      router.push(`/checkout/success?order=${orderId}`);
+      router.push(`/checkout/success?order=${data.order_id as string}`);
     } catch {
       toast("Eroare de rețea. Încearcă din nou.");
     }
@@ -185,15 +218,33 @@ export default function CheckoutPage() {
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
             Finalizează comanda
           </h1>
+
+          {/* ── Failed-payment banner ── */}
+          {paymentFailed && (
+            <div className="mt-4 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4">
+              <AlertCircle
+                className="mt-0.5 size-5 shrink-0 text-red-500"
+                strokeWidth={2}
+                aria-hidden
+              />
+              <p className="text-sm text-red-700">
+                Plata nu a fost realizată. Te rugăm să introduci din nou datele sau să alegi altă metodă.
+              </p>
+            </div>
+          )}
+
+          {/* ── Guest banner ── */}
           {!user && (
             <div className="mt-4 rounded-xl border border-slate-200 bg-white px-5 py-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3">
-                  <UserCircle className="mt-0.5 size-5 shrink-0 text-[#22624a]" strokeWidth={1.75} aria-hidden />
+                  <UserCircle
+                    className="mt-0.5 size-5 shrink-0 text-[#22624a]"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      Continuă ca invitat
-                    </p>
+                    <p className="text-sm font-semibold text-slate-900">Continuă ca invitat</p>
                     <p className="mt-0.5 text-sm text-slate-500">
                       Completează datele de livrare mai jos — nu este nevoie de cont.
                     </p>
@@ -224,6 +275,7 @@ export default function CheckoutPage() {
             className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]"
           >
             <div className="flex flex-col gap-6">
+              {/* ── Delivery details ── */}
               <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center gap-2 border-b border-slate-100 px-6 py-4">
                   <h2 className="text-base font-semibold text-slate-900">Detalii livrare</h2>
@@ -251,7 +303,12 @@ export default function CheckoutPage() {
                       <FormItem>
                         <FormLabel>Email</FormLabel>
                         <FormControl>
-                          <Input type="email" placeholder="ion@exemplu.ro" disabled={isSubmitting} {...field} />
+                          <Input
+                            type="email"
+                            placeholder="ion@exemplu.ro"
+                            disabled={isSubmitting}
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -265,7 +322,12 @@ export default function CheckoutPage() {
                       <FormItem>
                         <FormLabel>Telefon</FormLabel>
                         <FormControl>
-                          <Input type="tel" placeholder="07xx xxx xxx" disabled={isSubmitting} {...field} />
+                          <Input
+                            type="tel"
+                            placeholder="07xx xxx xxx"
+                            disabled={isSubmitting}
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -280,7 +342,11 @@ export default function CheckoutPage() {
                         <FormItem>
                           <FormLabel>Adresă</FormLabel>
                           <FormControl>
-                            <Input placeholder="Str. Exemplu, nr. 1, ap. 2" disabled={isSubmitting} {...field} />
+                            <Input
+                              placeholder="Str. Exemplu, nr. 1, ap. 2"
+                              disabled={isSubmitting}
+                              {...field}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -303,13 +369,14 @@ export default function CheckoutPage() {
                 </div>
               </section>
 
+              {/* ── Payment method ── */}
               <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center gap-2 border-b border-slate-100 px-6 py-4">
                   <h2 className="text-base font-semibold text-slate-900">Metodă de plată</h2>
                 </div>
                 <div className="flex flex-col gap-3 p-6">
                   {PAYMENT_OPTIONS.map((option) => {
-                    const Icon = option.icon;
+                    const Icon     = option.icon;
                     const selected = paymentMethod === option.value;
 
                     return (
@@ -335,9 +402,7 @@ export default function CheckoutPage() {
                             selected ? "border-[#22624a]" : "border-slate-300"
                           }`}
                         >
-                          {selected && (
-                            <div className="size-2 rounded-full bg-[#22624a]" />
-                          )}
+                          {selected && <div className="size-2 rounded-full bg-[#22624a]" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -363,6 +428,7 @@ export default function CheckoutPage() {
               </section>
             </div>
 
+            {/* ── Order summary sidebar ── */}
             <div className="flex flex-col gap-4">
               <section className="sticky top-24 rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
@@ -392,7 +458,7 @@ export default function CheckoutPage() {
                 </div>
 
                 <div className="px-5 pb-5">
-                  <Button type="submit" className="w-full">
+                  <Button type="submit" className="w-full" disabled={isSubmitting}>
                     {isSubmitting ? (
                       <>
                         <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -405,10 +471,7 @@ export default function CheckoutPage() {
                     )}
                   </Button>
                   <div className="mt-4 text-center">
-                    <Link
-                      href="/products"
-                      className="text-sm text-neutral-500 hover:text-neutral-700"
-                    >
+                    <Link href="/products" className="text-sm text-neutral-500 hover:text-neutral-700">
                       Înapoi
                     </Link>
                   </div>
@@ -419,5 +482,22 @@ export default function CheckoutPage() {
         </Form>
       </div>
     </div>
+  );
+}
+
+// ─── Page (Suspense boundary for useSearchParams) ─────────────────────────────
+
+export default function CheckoutPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">
+          <Loader2 className="mr-2 size-5 animate-spin" aria-hidden />
+          Se încarcă...
+        </div>
+      }
+    >
+      <CheckoutContent />
+    </Suspense>
   );
 }

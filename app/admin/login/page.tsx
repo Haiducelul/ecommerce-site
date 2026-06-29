@@ -99,7 +99,7 @@ function AdminLoginForm() {
                     <FormControl>
                       <Input
                         type="email"
-                        placeholder="admin@techpoint.ro"
+                        placeholder="admin@buildtech.ro"
                         autoComplete="email"
                         disabled={isSubmitting}
                         {...field}

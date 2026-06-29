@@ -9,7 +9,7 @@
 
 import pool from "@/db";
 import type { CatalogStatusSort } from "@/lib/catalog-filters";
-import type { Product, StatusId } from "@/lib/products";
+import type { Product, ProductWithMetrics, StatusId } from "@/lib/products";
 
 // ─── Internal row type ────────────────────────────────────────────────────────
 
@@ -55,18 +55,44 @@ const SELECT_COLS = `
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 /**
- * Fetch a single product by its UUID.
+ * Fetch a single product by its UUID, including sales and review metrics.
  * Returns null when not found — callers should trigger notFound().
  */
-export async function getProductById(id: string): Promise<Product | null> {
+export async function getProductById(id: string): Promise<ProductWithMetrics | null> {
   let client;
   try {
     client = await pool.connect();
-    const { rows } = await client.query<ProductRow>(
-      `SELECT ${SELECT_COLS} FROM products WHERE id = $1 LIMIT 1`,
+    const { rows } = await client.query<
+      ProductRow & { review_count: string; units_sold: string; created_at: Date }
+    >(
+      `SELECT ${SELECT_COLS}, p.created_at,
+              COALESCE(rc.review_count, 0) AS review_count,
+              COALESCE(us.units_sold, 0) AS units_sold
+       FROM products p
+       LEFT JOIN (
+         SELECT product_id, COUNT(*)::int AS review_count
+         FROM reviews
+         GROUP BY product_id
+       ) rc ON rc.product_id = p.id
+       LEFT JOIN (
+         SELECT product_id, COALESCE(SUM(quantity), 0)::int AS units_sold
+         FROM order_items
+         GROUP BY product_id
+       ) us ON us.product_id = p.id
+       WHERE p.id = $1
+       LIMIT 1`,
       [id]
     );
-    return rows.length ? rowToProduct(rows[0]) : null;
+    if (!rows.length) return null;
+
+    const row = rows[0];
+    const product = rowToProduct(row);
+    return {
+      ...product,
+      salesCount:  Number(row.units_sold),
+      reviewCount: Number(row.review_count),
+      created_at:  new Date(row.created_at).toISOString(),
+    };
   } catch (err) {
     console.error("[getProductById]", err);
     return null;
@@ -113,7 +139,7 @@ export async function getMostReviewedProducts(limit = 4): Promise<Product[]> {
        FROM products p
        LEFT JOIN reviews r ON r.product_id = p.id
        GROUP BY p.id
-       ORDER BY COUNT(r.id) DESC, p.created_at DESC
+       ORDER BY COALESCE(AVG(r.rating), 0) DESC, COUNT(r.id) DESC, p.created_at DESC
        LIMIT $1`,
       [limit]
     );
@@ -147,54 +173,6 @@ export async function getTopSellingProducts(limit = 4): Promise<Product[]> {
     return rows.map(rowToProduct);
   } catch (err) {
     console.error("[getTopSellingProducts]", err);
-    return [];
-  } finally {
-    client?.release();
-  }
-}
-
-/**
- * Fetch up to `limit` products with the given status, newest-first.
- * Used by the home page sections (bestsellers, AI recommendations).
- */
-export async function getProductsByStatus(
-  status: StatusId,
-  limit = 4
-): Promise<Product[]> {
-  let client;
-  try {
-    client = await pool.connect();
-    const { rows } = await client.query<ProductRow>(
-      `SELECT ${SELECT_COLS}
-       FROM products
-       WHERE status = $1
-       ORDER BY created_at DESC
-       LIMIT $2`,
-      [status, limit]
-    );
-    return rows.map(rowToProduct);
-  } catch (err) {
-    console.error("[getProductsByStatus]", err);
-    return [];
-  } finally {
-    client?.release();
-  }
-}
-
-/**
- * Fetch all products with live review counts (LEFT JOIN reviews).
- * Used by the catalog page server component.
- */
-export async function getAllProducts(): Promise<Product[]> {
-  let client;
-  try {
-    client = await pool.connect();
-    const { rows } = await client.query<ProductRow>(
-      `SELECT ${SELECT_COLS} FROM products ORDER BY created_at DESC`
-    );
-    return rows.map(rowToProduct);
-  } catch (err) {
-    console.error("[getAllProducts]", err);
     return [];
   } finally {
     client?.release();
@@ -342,6 +320,74 @@ export async function getProductsByIds(ids: string[]): Promise<Product[]> {
       .filter((product): product is Product => product != null);
   } catch (err) {
     console.error("[getProductsByIds]", err);
+    return [];
+  } finally {
+    client?.release();
+  }
+}
+
+export type RelatedProduct = {
+  id:        string;
+  name:      string;
+  price:     number;
+  old_price: number | null;
+  stock:     number;
+  category:  Product["category"];
+  image_url: string | null;
+  avg_rating:   number;
+  review_count: number;
+};
+
+/**
+ * Fetch up to 4 products from the same category as `productId`, sorted by
+ * average rating then review count (both descending). The current product
+ * is excluded from the results.
+ */
+export async function getRelatedProducts(
+  productId: string,
+  category: string,
+  limit = 4,
+): Promise<RelatedProduct[]> {
+  let client;
+  try {
+    client = await pool.connect();
+    const { rows } = await client.query<{
+      id:           string;
+      name:         string;
+      price:        string;
+      old_price:    string | null;
+      stock:        number;
+      category:     Product["category"];
+      image_url:    string | null;
+      avg_rating:   string;
+      review_count: string;
+    }>(
+      `SELECT p.id, p.name, p.price, p.old_price, p.stock, p.category, p.image_url,
+              COALESCE(AVG(r.rating), 0)  AS avg_rating,
+              COALESCE(COUNT(r.id), 0)    AS review_count
+       FROM products p
+       LEFT JOIN reviews r ON r.product_id = p.id
+       WHERE p.category = $1
+         AND p.id != $2
+       GROUP BY p.id
+       ORDER BY avg_rating DESC, review_count DESC, p.created_at DESC
+       LIMIT $3`,
+      [category, productId, limit],
+    );
+
+    return rows.map((row) => ({
+      id:           String(row.id),
+      name:         row.name,
+      price:        Number(row.price),
+      old_price:    row.old_price != null ? Number(row.old_price) : null,
+      stock:        Number(row.stock ?? 0),
+      category:     row.category,
+      image_url:    row.image_url,
+      avg_rating:   Number(row.avg_rating),
+      review_count: Number(row.review_count),
+    }));
+  } catch (err) {
+    console.error("[getRelatedProducts]", err);
     return [];
   } finally {
     client?.release();

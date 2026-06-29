@@ -42,7 +42,7 @@ export const CATEGORY_LABELS: Record<CategoryId, string> = {
 };
 
 export const STATUS_LABELS: Record<StatusId, string> = {
-  bestseller: "Bestseller",
+  bestseller: "Cel mai vândut",
   ai:         "Recomandări AI",
   reduceri:   "Reduceri",
 };
@@ -52,6 +52,48 @@ export const STATUS_COLORS: Record<StatusId, string> = {
   ai:         "bg-[#edf5f1]  text-[#1a4d3a]  ring-[#a8d7c5]",
   reduceri:   "bg-green-50 text-green-700 ring-green-200",
 };
+
+export type ProductBadge = {
+  label: string;
+  color: string;
+};
+
+export type ProductBadgeMetrics = {
+  salesCount: number;
+  reviewCount: number;
+  createdAt: string | Date;
+};
+
+export function getProductBadges(metrics: ProductBadgeMetrics): ProductBadge[] {
+  const badges: ProductBadge[] = [];
+
+  if (metrics.salesCount >= 5) {
+    badges.push({
+      label: "Cel mai vândut",
+      color: "bg-orange-100 text-orange-700 border-orange-200",
+    });
+  }
+
+  if (metrics.reviewCount >= 4) {
+    badges.push({
+      label: "Cel mai apreciat",
+      color: "bg-blue-100 text-blue-700 border-blue-200",
+    });
+  }
+
+  const createdAt = new Date(metrics.createdAt);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  if (createdAt >= thirtyDaysAgo) {
+    badges.push({
+      label: "Nou",
+      color: "bg-green-100 text-green-700 border-green-200",
+    });
+  }
+
+  return badges;
+}
 
 // ─── Product type (mirrors the DB schema) ────────────────────────────────────
 
@@ -70,26 +112,11 @@ export type Product = {
   specs:          string | null;
 };
 
-/*
- * Reference: one complete product record as it should look in the DB.
- * Seed real products via the admin panel at /admin/products/new.
- *
- * {
- *   id: "uuid",
- *   name: "Laptop ASUS Vivobook 15 OLED",
- *   description: "Ecran OLED 15.6 inch Full HD…",
- *   price: 3299,
- *   stock: 12,
- *   category: "laptop",
- *   status: "bestseller",
- *   image_url: "https://example.com/images/asus-vivobook.jpg",
- *   image_gallery: ["https://…/img1.jpg", "https://…/img2.jpg"],
- *   specifications: [
- *     { label: "Procesor", value: "Intel Core i5-13500H" },
- *     { label: "RAM",      value: "16 GB DDR4" },
- *   ],
- * }
- */
+export type ProductWithMetrics = Product & {
+  salesCount: number;
+  reviewCount: number;
+  created_at: string;
+};
 
 // ─── Formatting ───────────────────────────────────────────────────────────────
 

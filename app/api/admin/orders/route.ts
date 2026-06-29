@@ -20,11 +20,13 @@ type OrderItemRow = {
   order_id: string;
   product_name: string;
   quantity: number;
+  unit_price: string;
 };
 
 type OrderItemDto = {
   name: string;
   quantity: number;
+  unit_price: string;
 };
 
 type OrderDto = {
@@ -94,7 +96,7 @@ export async function GET() {
 
     const orderIds = rows.map((o) => o.id);
     const { rows: itemRows } = await client.query<OrderItemRow>(
-      `SELECT oi.order_id, p.name AS product_name, oi.quantity
+      `SELECT oi.order_id, p.name AS product_name, oi.quantity, oi.unit_price
        FROM order_items oi
        JOIN products p ON p.id = oi.product_id
        WHERE oi.order_id = ANY($1::uuid[])
@@ -106,8 +108,9 @@ export async function GET() {
     for (const row of itemRows) {
       const list = itemsByOrder.get(String(row.order_id)) ?? [];
       list.push({
-        name:     row.product_name,
-        quantity: row.quantity,
+        name:       row.product_name,
+        quantity:   row.quantity,
+        unit_price: String(row.unit_price),
       });
       itemsByOrder.set(String(row.order_id), list);
     }

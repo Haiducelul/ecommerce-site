@@ -8,10 +8,19 @@ type OrderRow = {
   status: string;
   total_amount: string;
   shipping_cost: string;
+  payment_method: string | null;
   created_at: Date | string;
   shipping_name: string | null;
+  shipping_email: string | null;
+  shipping_phone: string | null;
+  shipping_address: string | null;
   shipping_city: string | null;
 };
+
+function formatPaymentMethod(raw: string | null): string {
+  if (raw === "card") return "Plată cu cardul";
+  return "Ramburs la curier";
+}
 
 type ItemRow = {
   order_id: string;
@@ -35,6 +44,9 @@ type UserOrderDto = {
   shipping_cost: string;
   created_at: string;
   shipping_name: string | null;
+  shipping_email: string | null;
+  shipping_phone: string | null;
+  shipping_address: string | null;
   shipping_city: string | null;
   items: OrderItemDto[];
   payment_method: string;
@@ -65,8 +77,9 @@ export async function GET() {
     client = await pool.connect();
 
     const { rows: orders } = await client.query<OrderRow>(
-      `SELECT id, status, total_amount, shipping_cost, created_at,
-              shipping_name, shipping_city
+      `SELECT id, status, total_amount, shipping_cost, payment_method, created_at,
+              shipping_name, shipping_email, shipping_phone,
+              shipping_address, shipping_city
        FROM orders
        WHERE user_id = $1
        ORDER BY created_at DESC`,
@@ -101,15 +114,18 @@ export async function GET() {
     }
 
     const result: UserOrderDto[] = orders.map((o) => ({
-      id:            String(o.id),
-      status:        o.status,
-      total_amount:  String(o.total_amount),
-      shipping_cost: String(o.shipping_cost),
-      created_at:    toIsoDate(o.created_at),
-      shipping_name: o.shipping_name,
-      shipping_city: o.shipping_city,
-      items:         itemsByOrder.get(o.id) ?? [],
-      payment_method: "Ramburs la curier",
+      id:               String(o.id),
+      status:           o.status,
+      total_amount:     String(o.total_amount),
+      shipping_cost:    String(o.shipping_cost),
+      created_at:       toIsoDate(o.created_at),
+      shipping_name:    o.shipping_name,
+      shipping_email:   o.shipping_email,
+      shipping_phone:   o.shipping_phone,
+      shipping_address: o.shipping_address,
+      shipping_city:    o.shipping_city,
+      items:            itemsByOrder.get(o.id) ?? [],
+      payment_method:   formatPaymentMethod(o.payment_method),
     }));
 
     return NextResponse.json({ orders: result });

@@ -9,12 +9,12 @@ import { toast } from "sonner";
 import {
   Package,
   Clock,
-  ChevronRight,
   Star,
   X,
   Check,
   Loader2,
   Camera,
+  Download,
 } from "lucide-react";
 
 import { useAuth } from "@/store/useAuth";
@@ -24,6 +24,7 @@ import {
   getStatusBadgeClass,
   getStatusDotClass,
 } from "@/lib/orderStatus";
+import { generatePDF } from "@/utils/generatePDF";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,9 +56,39 @@ type UserOrder = {
   status: string;
   total_amount: string;
   created_at: string;
-  items: { name: string; quantity: number }[];
+  shipping_name: string | null;
+  shipping_email: string | null;
+  shipping_phone: string | null;
+  shipping_address: string | null;
+  shipping_city: string | null;
+  items: { name: string; quantity: number; unit_price: string }[];
   payment_method: string;
 };
+
+function formatShippingLine(order: UserOrder): string | null {
+  const parts = [order.shipping_address?.trim(), order.shipping_city?.trim()].filter(
+    Boolean
+  );
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function toPdfOrder(
+  order: UserOrder,
+  user: { name: string; email: string }
+) {
+  return {
+    id: order.id,
+    full_name: order.shipping_name ?? user.name,
+    user_email: order.shipping_email ?? user.email,
+    phone: order.shipping_phone,
+    shipping_address: order.shipping_address,
+    shipping_city: order.shipping_city,
+    total_amount: order.total_amount,
+    created_at: order.created_at,
+    payment_method: order.payment_method,
+    items: order.items,
+  };
+}
 
 type UserReview = {
   id: string;
@@ -78,6 +109,9 @@ export default function ProfilePage() {
   const [mounted, setMounted] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [orders, setOrders] = useState<UserOrder[]>([]);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [showAllOrders, setShowAllOrders] = useState(false);
+  const ORDERS_PREVIEW = 5;
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [reviews, setReviews] = useState<UserReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
@@ -564,8 +598,9 @@ export default function ProfilePage() {
                   </a>
                 </div>
               ) : (
+                <>
                 <ul className="flex flex-col divide-y divide-slate-100">
-                  {orders.map((order) => {
+                  {(showAllOrders ? orders : orders.slice(0, ORDERS_PREVIEW)).map((order) => {
                     const firstItem = order.items[0];
                     const itemLabel =
                       order.items.length === 0
@@ -575,51 +610,139 @@ export default function ProfilePage() {
                         : `${firstItem.name} +${order.items.length - 1} ${
                             order.items.length - 1 === 1 ? "produs" : "produse"
                           }`;
+                    const isExpanded = expandedOrderId === order.id;
+                    const shippingLine = formatShippingLine(order);
 
                     return (
-                      <li
-                        key={order.id}
-                        className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="flex min-w-0 flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs text-slate-400">
-                              #{order.id.slice(0, 8).toUpperCase()}
-                            </span>
-                            <span
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${getStatusBadgeClass(order.status)}`}
-                            >
+                      <li key={order.id}>
+                        <div className="flex items-center justify-between gap-4 px-6 py-4">
+                          <div className="flex min-w-0 flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs text-slate-400">
+                                #{order.id.slice(0, 8).toUpperCase()}
+                              </span>
                               <span
-                                className={`size-1.5 rounded-full ${getStatusDotClass(order.status)}`}
-                              />
-                              {formatOrderStatus(order.status)}
-                            </span>
+                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${getStatusBadgeClass(order.status)}`}
+                              >
+                                <span
+                                  className={`size-1.5 rounded-full ${getStatusDotClass(order.status)}`}
+                                />
+                                {formatOrderStatus(order.status)}
+                              </span>
+                            </div>
+                            <p className="text-sm font-medium text-slate-900">{itemLabel}</p>
+                            <p className="flex items-center gap-1.5 text-xs text-slate-400">
+                              <Clock className="size-3" strokeWidth={2} aria-hidden />
+                              {new Date(order.created_at).toLocaleDateString("ro-RO", {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
                           </div>
-                          <p className="text-sm font-medium text-slate-900">{itemLabel}</p>
-                          <p className="flex items-center gap-1.5 text-xs text-slate-400">
-                            <Clock className="size-3" strokeWidth={2} aria-hidden />
-                            {new Date(order.created_at).toLocaleDateString("ro-RO", {
-                              day: "numeric",
-                              month: "long",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-3">
-                          <div className="text-right">
+                          <div className="flex shrink-0 flex-col items-end gap-1">
                             <p className="text-base font-bold tabular-nums text-slate-900">
                               {formatPrice(Number(order.total_amount))}
                             </p>
                             <p className="text-xs text-slate-400">{order.payment_method}</p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedOrderId(isExpanded ? null : order.id)
+                              }
+                              className="mt-1 rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-[#22624a] shadow-sm transition-colors hover:border-[#a8d7c5] hover:bg-[#edf5f1]"
+                            >
+                              Detalii
+                            </button>
                           </div>
-                          <ChevronRight className="size-4 text-slate-300" strokeWidth={2} aria-hidden />
                         </div>
+
+                        {isExpanded && (
+                          <div className="border-t border-slate-100 bg-slate-50/80 px-6 pb-4">
+                            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                Produse comandate
+                              </p>
+                              {order.items.length > 0 ? (
+                                <ul className="space-y-1.5">
+                                  {order.items.map((item, index) => (
+                                    <li
+                                      key={`${order.id}-item-${index}`}
+                                      className="text-sm text-slate-700"
+                                    >
+                                      {item.name} - {item.quantity} buc
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="text-sm text-slate-500">
+                                  Niciun produs înregistrat pentru această comandă.
+                                </p>
+                              )}
+
+                              <div className="my-4 border-b border-gray-200" />
+
+                              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <div>
+                                  <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                    Adresă de livrare
+                                  </p>
+                                  <p className="text-sm text-slate-700">
+                                    {shippingLine || "Adresă indisponibilă"}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                    Metodă de plată
+                                  </p>
+                                  <p className="text-sm text-slate-700">
+                                    {order.payment_method || "Ramburs la curier"}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-3">
+                                <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                  Telefon client
+                                </p>
+                                <p className="text-sm text-slate-700">
+                                  {order.shipping_phone?.trim() || "Telefon indisponibil"}
+                                </p>
+                              </div>
+
+                              <div className="mt-4 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => generatePDF(toPdfOrder(order, user))}
+                                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-[#a8d7c5] hover:bg-[#edf5f1] hover:text-[#22624a]"
+                                >
+                                  <Download className="size-4" aria-hidden />
+                                  Descarcă factură
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </li>
                     );
                   })}
                 </ul>
+                {orders.length > ORDERS_PREVIEW && (
+                  <div className="border-t border-slate-100 py-3 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllOrders((prev) => !prev)}
+                      className="text-sm font-medium text-[#22624a] transition-colors hover:text-[#1a4d3a] hover:underline"
+                    >
+                      {showAllOrders
+                        ? "Afișează mai puține"
+                        : `Afișează toate comenzile (${orders.length})`}
+                    </button>
+                  </div>
+                )}
+                </>
               )}
             </section>
 

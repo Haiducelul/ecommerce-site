@@ -1,8 +1,15 @@
+/**
+ * POST /api/ai/compare
+ *
+ * Compară 2–3 produse din aceeași categorie folosind Google Gemini.
+ * Încarcă specificațiile din DB, construiește promptul și returnează JSON structurat.
+ */
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getProductsByIds } from "@/lib/db-products";
 import { formatPrice } from "@/lib/products";
 
+/** Payload trimis de frontend — date minime per produs */
 interface CompareProductPayload {
   id:          string;
   name:        string;
@@ -23,6 +30,7 @@ export interface CompareAiResult {
   generalConclusion: string;
 }
 
+/** Răspuns fallback când Gemini e indisponibil */
 const FALLBACK_RESULT: CompareAiResult = {
   product1Analysis:  "",
   product2Analysis:  "",
@@ -30,10 +38,12 @@ const FALLBACK_RESULT: CompareAiResult = {
     "Serverele AI sunt momentan aglomerate. Te rugăm să încerci din nou în câteva momente.",
 };
 
+// Client Gemini — singleton la nivel de modul
 const genAI = new GoogleGenerativeAI(
   process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "",
 );
 
+/** Instrucțiuni de sistem — format JSON strict, analiză per produs + concluzie */
 function buildSystemInstruction(productCount: number): string {
   const analysisKeys = Array.from(
     { length: productCount },
@@ -77,6 +87,7 @@ ${analysisRules}
 Nu include nicio altă cheie în afara celor de mai sus.`;
 }
 
+/** Bloc text cu date produs pentru promptul user (nume, preț, specs din DB) */
 function buildProductBlock(
   index: number,
   payload: CompareProductPayload,
@@ -94,6 +105,7 @@ Produs ${index + 1}:
 `.trim();
 }
 
+/** Parsează răspunsul Gemini — elimină markdown ```json și mapează câmpurile */
 function parseCompareResponse(raw: string, productCount: number): CompareAiResult {
   const jsonText = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   const parsed = JSON.parse(jsonText) as Record<string, unknown>;
@@ -111,6 +123,7 @@ function parseCompareResponse(raw: string, productCount: number): CompareAiResul
   return result;
 }
 
+/** Extrage array ordonat de analize pentru frontend */
 function analysesFromResult(result: CompareAiResult, productCount: number): string[] {
   const values = [
     result.product1Analysis,
@@ -136,6 +149,7 @@ export async function POST(request: Request) {
     const dbProducts = await getProductsByIds(ids);
     const dbById = new Map(dbProducts.map((p) => [p.id, p]));
 
+    // Validare server-side: toate produsele trebuie să fie din aceeași categorie
     const categories = dbProducts.map((p) => p.category);
     if (categories.length > 0 && new Set(categories).size > 1) {
       return NextResponse.json(
@@ -180,6 +194,7 @@ ${products
         analyses: analysesFromResult(comparison, productCount),
       });
     } catch (geminiErr) {
+      // Nu returnăm 500 — frontend primește mesaj prietenos
       console.error("[ai/compare POST] Gemini error:", geminiErr);
       return NextResponse.json({
         ...FALLBACK_RESULT,

@@ -1,10 +1,13 @@
 "use client";
 
+/**
+ * Componentă invizibilă — sincronizează coșul cu serverul după autentificare,
+ * astfel încât badge-ul din Navbar reflectă produsele corecte.
+ */
 import { useEffect, useRef } from "react";
 import { useAuth } from "@/store/useAuth";
 import { setCartServerSync, useCart } from "@/hooks/use-cart";
 
-/** Syncs cart with the API for registered users; guests rely on localStorage persist. */
 export default function CartHydrator() {
   const { user } = useAuth();
   const lastUserId = useRef<string | null>(null);

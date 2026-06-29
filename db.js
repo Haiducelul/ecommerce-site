@@ -7,13 +7,13 @@ const pool = new Pool({
   user:     process.env.PGUSER     || "postgres",
   password: process.env.PGPASSWORD || "102030",
 
-  // Keep up to 10 idle connections ready; release connections idle for > 30 s
+  // Păstrează până la 10 conexiuni inactive; eliberează conexiunile inactive după > 30 s
   max:             10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
 });
 
-// Log every new physical connection (helpful during development)
+// Înregistrează fiecare conexiune fizică nouă (util în timpul dezvoltării)
 pool.on("connect", () => {
   console.log("[db] New client connected to PostgreSQL");
 });
@@ -23,8 +23,8 @@ pool.on("error", (err) => {
 });
 
 /**
- * Run a quick SELECT 1 to verify the pool can reach the database.
- * Called once at startup; safe to remove in production.
+ * Rulează un SELECT rapid pentru a verifica dacă pool-ul poate accesa baza de date.
+ * Apelat o singură dată la pornire; poate fi eliminat în producție.
  */
 async function testConnection() {
   let client;

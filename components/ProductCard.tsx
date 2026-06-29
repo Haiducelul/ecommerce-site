@@ -1,7 +1,17 @@
 "use client";
 
+/**
+ * Card de produs — layout vertical reutilizabil (catalog, homepage, comparație).
+ *
+ * Structură vizuală:
+ *   - Container: rounded-xl, border slate, shadow la hover
+ *   - Overlay: butoane rotunde absolute (Compară stânga, Favorite dreapta)
+ *   - Conținut: imagine → titlu → stele → stoc → preț → CTA full-width
+ *   - Prop `compact`: variantă redusă pentru pagina /compare (font + spacing mai mici)
+ */
+
 import Link from "next/link";
-import { Heart, ShoppingCart, Check, Star, GitCompare } from "lucide-react";
+import { Heart, ShoppingCart, Check, GitCompare } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -11,6 +21,7 @@ import { useAuth } from "@/store/useAuth";
 import { useCart } from "@/hooks/use-cart";
 import type { CategoryId } from "@/lib/products";
 import ProductPriceDisplay from "@/components/ProductPriceDisplay";
+import StarRating from "@/components/StarRating";
 
 export type ProductCardProps = {
   id?: string;
@@ -49,6 +60,7 @@ export default function ProductCard({
   const [reviewCount, setReviewCount] = useState(0);
   const [avgRating, setAvgRating] = useState(0);
 
+  // Badge-urile (favorite/compară) se colorează doar după randare client
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
@@ -80,7 +92,7 @@ export default function ProductCard({
     };
   }, [mounted, id]);
 
-  // Keep server and first-client render identical to avoid hydration mismatches.
+  // Stări vizuale butoane overlay — verde brand (#22624a) când e activ
   const wishlisted = mounted && !!id && isInWishlist(id);
   const compared   = mounted && !!id && isInCompare(id);
   const compareDisabled = mounted && !!id && !compared && isFull();
@@ -103,7 +115,7 @@ export default function ProductCard({
     }
 
     setCartStatus("added");
-    setTimeout(() => setCartStatus("idle"), 2500);
+    setTimeout(() => setCartStatus("idle"), 2500); // feedback verde 2.5s, apoi revine la CTA normal
   };
 
   const handleWishlist = async (e: React.MouseEvent) => {
@@ -173,9 +185,11 @@ export default function ProductCard({
   };
 
   return (
+    // Card flex-col — înălțime egală în grid-uri de catalog
     <article className={`relative flex h-full w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow duration-200 hover:shadow-md ${compact ? "text-[13px]" : ""}`}>
       {id && (
         <>
+          {/* Pill „Compară” — stânga sus, backdrop-blur, verde când e selectat */}
           <button
             type="button"
             onClick={handleCompare}
@@ -204,6 +218,7 @@ export default function ProductCard({
             Compară
           </button>
 
+          {/* Buton inimă — dreapta sus, roz (rose) când e favorit */}
           <button
             type="button"
             onClick={handleWishlist}
@@ -232,11 +247,12 @@ export default function ProductCard({
         </>
       )}
 
+      {/* Zona clickabilă — imagine + detalii; hover subtil pe fundal */}
       <Link
         href={detailHref}
         className="flex flex-1 cursor-pointer flex-col transition-colors duration-200 hover:bg-neutral-50/50"
       >
-        {/* Image area */}
+        {/* Imagine: aspect-square (normal) sau h-48 fix (compact); object-contain */}
         <div className={`relative overflow-hidden rounded-t-xl bg-white ${compact ? "h-48 p-2" : "aspect-square p-4"}`}>
           {imageUrl ? (
             <img
@@ -258,25 +274,18 @@ export default function ProductCard({
             <h3 className={`truncate font-medium leading-snug text-neutral-900 ${compact ? "text-xs" : "text-base"}`}>{title}</h3>
           </div>
 
-          {/* Star rating */}
+          {/* Stele galbene + număr recenzii în paranteză */}
           <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-0.5">
-              {Array.from({ length: 5 }, (_, i) => {
-                const filled = i < Math.round(avgRating);
-                return (
-                  <Star
-                    key={i}
-                    className={`shrink-0 ${compact ? "size-2.5" : "size-3.5"} ${filled ? "fill-yellow-400 text-yellow-400" : "fill-none text-neutral-300"}`}
-                    strokeWidth={filled ? 0 : 1.5}
-                    aria-hidden
-                  />
-                );
-              })}
-            </div>
+            <StarRating
+              rating={avgRating}
+              sizeClass={compact ? "size-2.5" : "size-3.5"}
+              filledClass="text-yellow-400"
+              emptyClass="text-neutral-300"
+            />
             <span className={`text-neutral-400 ${compact ? "text-[10px]" : "text-xs"}`}>({reviewCount})</span>
           </div>
 
-          {/* Stock indicator — always rendered, sits directly above price */}
+          {/* Indicator stoc — gri normal / roșu dacă epuizat */}
           {stock > 0 ? (
             <p className={`font-medium text-gray-900 ${compact ? "text-[10px]" : "text-xs"}`}>
               {stock} produse disponibile
@@ -297,6 +306,7 @@ export default function ProductCard({
         </div>
       </Link>
 
+      {/* CTA „Adaugă în coș” — verde brand, devine verde deschis cu bifă la succes */}
       <div className={compact ? "px-2 pb-2" : "px-4 pb-2"}>
         <button
           type="button"

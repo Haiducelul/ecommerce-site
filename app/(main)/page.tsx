@@ -13,12 +13,13 @@ import {
 // Always fetch fresh data — bypasses Next.js full-route cache.
 export const revalidate = 0;
 
-/** Blue region in viewBox 0–1000 × 0–340: right side + wave (shifted right for text clearance) */
-const HERO_WAVE_PATH =
-  "M580 0H1000V340H576C460 328 406 252 418 170C430 88 496 32 580 0Z";
-
 const SEE_MORE_LINK_CLASS =
   "text-[#22624a] hover:text-[#4faf8b] font-bold transition-colors";
+
+/** Gradient: lavender-purple (stânga) → icy blue (dreapta) */
+const HERO_GRADIENT_BG =
+  "bg-gradient-to-r from-[#9575eb] via-[#6b78e8] to-[#0891b2]";
+const HERO_TEXT_GRADIENT = `${HERO_GRADIENT_BG} bg-clip-text text-transparent`;
 
 const CATEGORY_LINKS = [
   { label: "Produse",     slug: ""            as const, icon: null       },
@@ -64,51 +65,46 @@ export default async function Home() {
 
   return (
     <>
-      <div className="mx-auto flex w-[90%] max-w-[1100px] flex-1 flex-col gap-6 px-6 py-4">
+      <div className="mx-auto flex w-[92%] max-w-[1100px] flex-1 flex-col gap-6 px-3 py-4 sm:w-[90%] sm:px-6">
         <div className="flex flex-col gap-3">
-        <section className="relative h-[340px] w-full overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
-          <svg
-            className="pointer-events-none absolute inset-y-0 right-0 h-full w-[92%] translate-x-6 text-[#22624a] sm:translate-x-10"
-            viewBox="0 0 1000 340"
-            preserveAspectRatio="none"
-            aria-hidden
-          >
-            <path fill="currentColor" d={HERO_WAVE_PATH} />
-          </svg>
-
-          <div className="relative z-10 flex h-full w-full">
-            <div className="flex w-[52%] shrink-0 flex-col justify-center pl-12 pr-12">
-              <h1 className="text-2xl font-bold uppercase leading-tight tracking-tight text-black sm:text-3xl md:text-4xl lg:text-[2.75rem] lg:leading-tight">
-                Configurează-ți propriul PC.
+        <section className="relative w-full overflow-hidden rounded-3xl border border-neutral-200 bg-[#edf5f1] shadow-sm md:h-[340px]">
+          <div className="relative z-10 flex h-full w-full flex-col items-center justify-between gap-4 px-4 py-6 md:flex-row md:gap-0 md:px-0 md:py-0">
+            <div className="flex w-full shrink-0 flex-col items-center justify-center px-1 text-center md:w-[52%] md:items-start md:pl-12 md:pr-12 md:text-left">
+              <h1
+                className={`max-w-lg text-lg font-semibold leading-snug tracking-tight sm:text-xl md:text-2xl md:leading-relaxed ${HERO_TEXT_GRADIENT}`}
+              >
+                Configurează-ți calculatorul visat singur sau lasă-te ghidat de asistentul Volt.
               </h1>
-              <p className="mt-2 max-w-md text-sm text-neutral-600 sm:text-base">
-                Performanță maximă, configurare simplă. Construiește-ți PC-ul exact așa cum îți dorești.
+              <p className={`mt-2 max-w-md text-sm md:text-base ${HERO_TEXT_GRADIENT}`}>
+                Alege componentele potrivite sau lasă Volt să îți recomande configurația ideală.
               </p>
               <div className="mt-4">
                 <Link
                   href="/pc-builder"
-                  className="inline-flex items-center justify-center rounded-full border-2 border-[#22624a] bg-white px-6 py-2 text-sm font-semibold text-[#22624a] transition-colors hover:bg-[#edf5f1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22624a]"
+                  className={`inline-flex rounded-full p-[2px] ${HERO_GRADIENT_BG} transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9575eb]`}
                 >
-                  Configurează acum
+                  <span className="inline-flex items-center justify-center rounded-full bg-white px-6 py-2 text-sm font-semibold transition-colors hover:bg-[#edf5f1]">
+                    <span className={HERO_TEXT_GRADIENT}>Configurează acum</span>
+                  </span>
                 </Link>
               </div>
             </div>
 
-            <div className="flex w-[48%] shrink-0 items-end justify-center pb-3 pr-8 pl-4">
+            <div className="flex w-full shrink-0 items-end justify-center px-2 pb-0 md:w-[48%] md:pb-3 md:pl-4 md:pr-8">
               <Image
-                src="/poza_logo.png"
-                alt="Desktop PC"
+                src="/poza_log.png"
+                alt="BuildTech"
                 width={640}
                 height={360}
                 priority
-                className="h-[320px] w-auto max-w-full object-contain object-bottom scale-110 drop-shadow-2xl"
+                className="h-[220px] w-auto max-w-full object-contain object-bottom drop-shadow-2xl sm:h-[260px] md:h-[320px] md:scale-110"
               />
             </div>
           </div>
         </section>
 
         <nav
-          className="flex w-full flex-wrap items-center justify-between gap-y-2 rounded-2xl border border-neutral-200 bg-white px-8 py-3 shadow-sm"
+          className="grid w-full grid-cols-3 gap-2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm sm:grid-cols-4 sm:gap-3 sm:p-3 md:flex md:flex-wrap md:items-center md:justify-between md:gap-y-2 md:px-8 md:py-3"
           aria-label="Categorii produse"
         >
           {CATEGORY_LINKS.map(({ label, slug, icon: Icon }) => (
@@ -224,7 +220,7 @@ function CategoryLink({
   return (
     <Link
       href={href}
-      className="group flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-transparent bg-transparent text-sm font-semibold text-neutral-700 transition-colors duration-150 hover:bg-neutral-50 hover:text-[#22624a]"
+      className="group flex min-h-[70px] w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-neutral-200 bg-white p-2 text-center text-xs font-semibold text-neutral-700 transition-colors duration-150 hover:border-[#a8d7c5] hover:bg-[#edf5f1]/50 hover:text-[#22624a] sm:text-sm md:min-h-0 md:w-auto md:flex-row md:justify-start md:gap-2 md:border-transparent md:bg-transparent md:p-0 md:text-left"
     >
       {Icon && (
         <Icon

@@ -1,8 +1,16 @@
+/**
+ * POST /api/ai/check-compatibility
+ *
+ * Analizează compatibilitatea unei configurații PC folosind Google Gemini.
+ * Primește componentele selectate de utilizator și catalogul disponibil din magazin,
+ * apoi returnează un raport scurt în română (status per componentă + scor final).
+ */
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 
+
+/** O componentă PC trimisă de client (din coșul de configurare). */
 interface ComponentPayload {
   id:          string;
   name:        string;
@@ -10,47 +18,63 @@ interface ComponentPayload {
   subcategory: string;
 }
 
+/** Corpul cererii POST — configurația curentă + produsele din care AI poate recomanda. */
 interface RequestBody {
   selectedComponents: ComponentPayload[];
   availableProducts:  ComponentPayload[];
 }
 
-// ── Gemini client (module-level singleton) ────────────────────────────────────
+// ── Client Gemini (singleton la nivel de modul) ───────────────────────────────
 
+// O singură instanță reutilizată pe durata procesului Node.js
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "");
 
-const SYSTEM_INSTRUCTION = `Ești un expert în asamblarea calculatoarelor. Vei analiza compatibilitatea componentelor alese de utilizator și vei oferi recomandări concise în limba română.
+/**
+ * Instrucțiuni de sistem pentru model — definesc formatul răspunsului Volt
+ * (emoji status, o linie per componentă, concluzie cu procent compatibilitate).
+ */
+const SYSTEM_INSTRUCTION = `Ești Volt, asistent pentru compatibilitate PC.
+Răspunzi strict în română, foarte concis — exact o linie scurtă per componentă, plus o concluzie finală.
 
-Reguli stricte de formatare — respectă-le fără excepție:
-- Nu folosi niciun emoji sau simboluri decorative.
-- Folosește expresia "tipul de conectare" pentru a descrie soclul/socket-ul procesorului sau al plăcii de bază. Nu folosi niciodată cuvintele "soclu" sau "socket".
-- Răspunde concis, structurat, cu titluri bold pentru fiecare secțiune.
+Reguli obligatorii:
+- Fiecare linie de componentă începe cu un emoji de status:
+  - ✅ pentru componente perfect compatibile
+  - ⚠️ pentru alegeri sub-optimale, bottleneck minor sau recomandări de upgrade
+  - ❌ pentru incompatibilități reale
+- O singură linie per componentă, fără paragrafe, fără bullet-uri.
+- Text scurt, natural și util după ":" (maxim o propoziție scurtă).
+- Dacă recomanzi înlocuitori, folosește DOAR produse din lista disponibilă.
+- Nu menționa coolere/ventilatoare/sisteme de răcire lipsă.
+- Încheie ÎNTOTDEAUNA cu secțiunea Concluzie.
 
-Componente analizate — STRICT doar acestea șapte:
-Procesor (CPU), Placă de bază, Placă video (GPU), Memorie RAM, Sursă de alimentare, Carcasă, Stocare.
-- Magazinul NU vinde coolere de procesor, ventilatoare sau orice soluție de răcire. Nu menționează niciodată lipsa unui cooler, a unui ventilator sau a unui sistem de răcire — nici ca avertisment, nici ca componentă lipsă, nici în concluzie. Este strict interzis.
+Format obligatoriu exact:
+✅ Procesor & Placă de bază: <text scurt>
+⚠️ Placă Video: <text scurt>
+✅ Memorie RAM: <text scurt>
+✅ Sursă de alimentare: <text scurt>
+✅ Carcasă: <text scurt>
+✅ Stocare: <text scurt>
 
-Titluri de secțiuni obligatorii — folosește EXACT aceste formulări, fără variații:
-- Pentru compatibilitatea procesor/placă de bază folosește EXACT titlul: "**Compatibilitate procesor cu placa de bază:**"
-- Pentru compatibilitatea sursei de alimentare folosește EXACT titlul: "**Compatibilitate sursă și consum:**"
-- Pentru RAM folosește EXACT titlul: "**Memorie RAM:**"
-- Pentru stocare folosește EXACT titlul: "**Stocare:**"
-- Pentru concluzie folosește EXACT titlul: "**Concluzie:**"
+Concluzie
+Compatibilitate: <X>%.
+<explicație sau recomandare, STRICT sub 20 de cuvinte>
 
-Reguli de conținut:
-- Analizează: tipul de conectare al procesorului față de placa de bază, tipul de RAM (DDR4/DDR5), wattajul sursei față de consumul estimat al componentelor.
-- Dacă procesorul și placa de bază sunt compatibile, scrie EXACT: "**Compatibilitate procesor cu placa de bază:** Placa de bază și procesorul se potrivesc perfect."
-- Dacă există o incompatibilitate la orice componentă, recomandă un înlocuitor EXCLUSIV din lista produselor disponibile furnizată. Nu inventa produse care nu există în acea listă.
-- Dacă build-ul este incomplet (lipsesc componente din cele șapte de mai sus), menționează ce lipsește și recomandă produse din lista disponibilă.
-- Încheie întotdeauna cu secțiunea "**Concluzie:**" de maxim 2 propoziții.`;
+Reguli pentru Concluzie:
+- Concluzia are EXACT 3 linii separate, în formatul de mai sus.
+- Linia 1: doar cuvântul "Concluzie" (fără ":").
+- Linia 2: doar scorul, ex: "Compatibilitate: 85%." (folosește procent).
+- Linia 3: maxim 20 de cuvinte, scurtă și directă.
+- Dacă există ⚠️ sau ❌, linia 3 menționează explicit ce să schimbi (din lista disponibilă).
+- Exemplu linia 3: "Recomandăm RTX 4070 SUPER în locul plăcii video actuale."`;
 
-// ── Route handler ─────────────────────────────────────────────────────────────
+// ── Handler rută ──────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as RequestBody;
     const { selectedComponents, availableProducts } = body;
 
+    // Validare minimă — trebuie să existe cel puțin o componentă selectată
     if (!Array.isArray(selectedComponents) || selectedComponents.length === 0) {
       return NextResponse.json(
         { error: "No components selected." },
@@ -58,11 +82,13 @@ export async function POST(request: Request) {
       );
     }
 
+    // Inițializare model Gemini cu promptul de sistem (reguli + format răspuns)
     const model = genAI.getGenerativeModel({
       model:             "gemini-2.5-flash",
       systemInstruction: SYSTEM_INSTRUCTION,
     });
 
+    // Construim mesajul utilizator: configurația curentă + catalogul din DB (JSON)
     const userMessage = `
 Configurația curentă a utilizatorului (componentele selectate):
 ${JSON.stringify(selectedComponents, null, 2)}
@@ -73,9 +99,11 @@ ${JSON.stringify(availableProducts, null, 2)}
 Analizează compatibilitatea configurației și oferă recomandări dacă este necesar.
 `.trim();
 
+    // Apel către API-ul Google Generative AI
     const result = await model.generateContent(userMessage);
     const analysis = result.response.text();
 
+    // Răspuns JSON către PcBuilderClient.tsx
     return NextResponse.json({ analysis });
   } catch (err) {
     console.error("[check-compatibility] Gemini error:", err);

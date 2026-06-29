@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Star, Pencil, Trash2, Loader2 } from "lucide-react";
 
 interface Review {

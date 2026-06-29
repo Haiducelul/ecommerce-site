@@ -92,6 +92,15 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[api/admin/products DELETE]", err);
+    const code = (err as { code?: string }).code;
+    if (code === "23503" || code === "23001") {
+      return NextResponse.json(
+        {
+          error: "Acțiune respinsă. Te rog să editezi stocul produsului la 0.",
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: "Eroare server la ștergere." }, { status: 500 });
   } finally {
     client?.release();

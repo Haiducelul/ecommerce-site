@@ -1,5 +1,11 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import AdminSidebar from "./AdminSidebar";
+
+export const metadata: Metadata = {
+  title: "BuildTech Admin",
+  description: "Panou de administrare BuildTech",
+};
 
 export default async function AdminDashboardLayout({
   children,

@@ -7,7 +7,6 @@ import {
   Package,
   ShoppingCart,
   Users,
-  ShieldCheck,
   LogOut,
   Star,
 } from "lucide-react";
@@ -45,7 +44,7 @@ export default function AdminSidebar({ adminName, adminEmail }: Props) {
       {/* Brand */}
       <div className="flex items-center border-b border-slate-200 px-5 py-5">
         <span className="text-base font-bold tracking-tight text-slate-900">
-          Techpoint Admin
+          BuildTech Admin
         </span>
       </div>
 

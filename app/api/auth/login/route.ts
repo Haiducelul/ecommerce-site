@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcrypt";
 import { z } from "zod";
+import crypto from "crypto";
 import pool from "@/db";
 import { signUserToken, USER_COOKIE, userCookieOptions } from "@/lib/userAuth";
+import { sendTwoFactorEmail } from "@/lib/email";
 
 const schema = z.object({
   email:    z.string().email(),
   password: z.string().min(1),
 });
+
+const TWO_FACTOR_DOMAINS = new Set(["gmail.com", "yahoo.com", "yahoo.ro"]);
+
+function requiresTwoFactor(email: string): boolean {
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  return TWO_FACTOR_DOMAINS.has(domain);
+}
+
+function generateSixDigitCode(): string {
+  return String(crypto.randomInt(100_000, 999_999));
+}
 
 export async function POST(req: NextRequest) {
   const body   = await req.json().catch(() => null);
@@ -23,7 +36,7 @@ export async function POST(req: NextRequest) {
   try {
     client = await pool.connect();
     const result = await client.query(
-      `SELECT id, name, email, role, password_hash, phone, address, city, avatar_url
+      `SELECT id, name, email, role, password_hash
        FROM users WHERE email = $1`,
       [emailNorm]
     );
@@ -48,22 +61,50 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 2FA — only for Gmail / Yahoo addresses
+    if (requiresTwoFactor(emailNorm)) {
+      const code      = generateSixDigitCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+
+      await client.query(
+        `DELETE FROM two_factor_tokens WHERE email = $1`,
+        [emailNorm]
+      );
+      await client.query(
+        `INSERT INTO two_factor_tokens (email, token, expires_at)
+         VALUES ($1, $2, $3)`,
+        [emailNorm, code, expiresAt]
+      );
+
+      await sendTwoFactorEmail(emailNorm, code);
+
+      return NextResponse.json({ requiresTwoFactor: true });
+    }
+
+    // All other domains — create session immediately
+    const { rows: userRows } = await client.query(
+      `SELECT id, name, email, phone, address, city, avatar_url
+       FROM users WHERE email = $1`,
+      [emailNorm]
+    );
+    const fullUser = userRows[0];
+
     const token = await signUserToken({
-      sub:   user.id,
-      name:  user.name,
-      email: user.email,
+      sub:   fullUser.id,
+      name:  fullUser.name,
+      email: fullUser.email,
       role:  "customer",
     });
 
     const response = NextResponse.json({
       user: {
-        id:         user.id,
-        name:       user.name,
-        email:      user.email,
-        phone:      user.phone ?? undefined,
-        address:    user.address ?? undefined,
-        city:       user.city ?? undefined,
-        avatar_url: user.avatar_url ?? undefined,
+        id:         fullUser.id,
+        name:       fullUser.name,
+        email:      fullUser.email,
+        phone:      fullUser.phone ?? undefined,
+        address:    fullUser.address ?? undefined,
+        city:       fullUser.city ?? undefined,
+        avatar_url: fullUser.avatar_url ?? undefined,
       },
     });
 

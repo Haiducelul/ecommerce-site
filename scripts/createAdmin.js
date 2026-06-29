@@ -7,7 +7,7 @@
  *   node scripts/createAdmin.js
  *
  * Override defaults with env vars:
- *   ADMIN_NAME="John" ADMIN_EMAIL="john@techpoint.ro" ADMIN_PASSWORD="secret" node scripts/createAdmin.js
+ *   ADMIN_NAME="John" ADMIN_EMAIL="john@buildtech.ro" ADMIN_PASSWORD="secret" node scripts/createAdmin.js
  */
 
 const bcrypt = require("bcrypt");
@@ -27,7 +27,7 @@ async function createAdmin() {
   try {
     client = await pool.connect();
 
-    // Abort if an admin with this email already exists
+    // verificare daca exista un admin cu acest email
     const existing = await client.query(
       "SELECT id FROM users WHERE email = $1",
       [ADMIN_EMAIL]
@@ -38,7 +38,7 @@ async function createAdmin() {
       return;
     }
 
-    // Hash the password
+    // hasurare parola
     console.log("[createAdmin] Hashing password…");
     const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
 

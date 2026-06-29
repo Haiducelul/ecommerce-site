@@ -32,11 +32,11 @@ export async function runAiProductSearch(query: string): Promise<AiSearchResult>
     schema: aiSearchSchema,
     schemaName: "ProductRecommendations",
     schemaDescription:
-      "Recomandări de produse TECHPOINT pe baza cererii utilizatorului",
+      "Recomandări de produse BuildTech pe baza cererii utilizatorului",
     system:
-      "Ești asistentul de recomandări al magazinului online TECHPOINT. " +
+      "Ești asistentul de recomandări al magazinului online BuildTech. " +
       "Analizezi catalogul de produse și alegi doar ID-uri valide din listă. " +
-      "Răspunde mereu în limba română. Fii concis și util.",
+      "Răspunde mereu în limba română. Oferă răspunsuri extrem de scurte: maximum 1-2 propoziții scurte.",
     prompt: `Cererea utilizatorului: "${query}"
 
 Catalog produse (JSON):

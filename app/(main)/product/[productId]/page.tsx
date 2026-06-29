@@ -1,27 +1,21 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ChevronRight, Star, Sparkles, BadgePercent, PackageCheck, Truck, ShieldCheck } from "lucide-react";
+import { ChevronRight, PackageCheck, Truck, ShieldCheck, AlertCircle } from "lucide-react";
 import AddToCartButton from "@/components/AddToCartButton";
 import WishlistButton from "@/components/WishlistButton";
 import ProductReviewsSection from "@/components/ProductReviewsSection";
 import ProductImageGallery from "@/components/ProductImageGallery";
 import ProductPriceDisplay from "@/components/ProductPriceDisplay";
+import ProductCard from "@/components/ProductCard";
 import {
   CATEGORY_LABELS,
-  STATUS_LABELS,
-  STATUS_COLORS,
-  type StatusId,
+  getProductBadges,
+  formatPrice,
 } from "@/lib/products";
-import { getProductById } from "@/lib/db-products";
+import { getProductById, getRelatedProducts } from "@/lib/db-products";
 
 type ProductPageProps = {
   params: Promise<{ productId: string }>;
-};
-
-const STATUS_ICONS: Record<StatusId, React.ReactNode> = {
-  bestseller: <Star className="size-3.5" strokeWidth={2} aria-hidden />,
-  ai: <Sparkles className="size-3.5" strokeWidth={2} aria-hidden />,
-  reduceri: <BadgePercent className="size-3.5" strokeWidth={2} aria-hidden />,
 };
 
 export default async function ProductPage({ params }: ProductPageProps) {
@@ -32,12 +26,19 @@ export default async function ProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
+  const related = await getRelatedProducts(productId, product.category);
+
   const categoryLabel = CATEGORY_LABELS[product.category];
-  const statusLabel = STATUS_LABELS[product.status];
-  const statusColorClasses = STATUS_COLORS[product.status];
+  const badges = getProductBadges({
+    salesCount: product.salesCount,
+    reviewCount: product.reviewCount,
+    createdAt: product.created_at,
+  });
+
+  const inStock = product.stock > 0;
 
   return (
-    <div className="flex flex-col pb-16 pt-6">
+    <div className="flex flex-col pb-10 pt-6">
       <div className="mx-auto w-full max-w-6xl px-6 md:px-12">
         {/* ── Breadcrumbs ── */}
         <nav aria-label="Breadcrumb" className="mb-6">
@@ -47,7 +48,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
                 href="/"
                 className="transition-colors hover:text-neutral-900"
               >
-                TechPoint
+                BuildTech
               </Link>
             </li>
             <li aria-hidden>
@@ -87,23 +88,52 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
           {/* ── Right: Product info ── */}
           <div className="flex flex-col gap-5">
-            {/* Category + Status badges */}
+            {/* Category + dynamic badges */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-700 ring-1 ring-neutral-200">
+              <span className="inline-flex items-center rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-700 ring-1 ring-neutral-200">
                 {categoryLabel}
               </span>
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusColorClasses}`}
-              >
-                {STATUS_ICONS[product.status]}
-                {statusLabel}
-              </span>
+              {badges.map((badge) => (
+                <span
+                  key={badge.label}
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${badge.color}`}
+                >
+                  {badge.label}
+                </span>
+              ))}
             </div>
 
             {/* Title */}
             <h1 className="text-2xl font-bold leading-snug tracking-tight text-neutral-900 sm:text-3xl">
               {product.name}
             </h1>
+
+            {/* Trust & Delivery — sub titlu, deasupra prețului */}
+            <div className="my-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+              <ul className="flex flex-col gap-3">
+                <li className="flex items-center gap-3 text-sm">
+                  {inStock ? (
+                    <>
+                      <PackageCheck className="size-5 shrink-0 text-[#22624a]" strokeWidth={1.75} aria-hidden />
+                      <span className="font-medium text-neutral-800">În stoc</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="size-5 shrink-0 text-red-500" strokeWidth={1.75} aria-hidden />
+                      <span className="font-semibold text-red-500">Stoc epuizat</span>
+                    </>
+                  )}
+                </li>
+                <li className="flex items-center gap-3 text-sm">
+                  <Truck className="size-5 shrink-0 text-neutral-500" strokeWidth={1.75} aria-hidden />
+                  <span className="text-neutral-700">Livrare rapidă prin curier</span>
+                </li>
+                <li className="flex items-center gap-3 text-sm">
+                  <ShieldCheck className="size-5 shrink-0 text-neutral-500" strokeWidth={1.75} aria-hidden />
+                  <span className="text-neutral-700">Garanție inclusă 24 luni</span>
+                </li>
+              </ul>
+            </div>
 
             {/* Price */}
             <ProductPriceDisplay price={product.price} oldPrice={product.old_price} size="lg" />
@@ -127,28 +157,11 @@ export default async function ProductPage({ params }: ProductPageProps) {
               />
             </div>
 
-            {/* Trust & Delivery */}
-            <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-              <ul className="flex flex-col gap-3">
-                <li className="flex items-center gap-3 text-sm">
-                  <PackageCheck className="size-5 shrink-0 text-[#22624a]" strokeWidth={1.75} aria-hidden />
-                  <span className="font-medium text-neutral-800">În stoc</span>
-                </li>
-                <li className="flex items-center gap-3 text-sm">
-                  <Truck className="size-5 shrink-0 text-neutral-500" strokeWidth={1.75} aria-hidden />
-                  <span className="text-neutral-700">Livrare rapidă prin curier</span>
-                </li>
-                <li className="flex items-center gap-3 text-sm">
-                  <ShieldCheck className="size-5 shrink-0 text-neutral-500" strokeWidth={1.75} aria-hidden />
-                  <span className="text-neutral-700">Garanție inclusă 24 luni</span>
-                </li>
-              </ul>
-            </div>
           </div>
         </div>
 
         {/* ── Unified content block ── */}
-        <div className="mt-10 rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <div className="mt-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
 
           {/* Description & Specs grid */}
           <div className="grid grid-cols-1 gap-0 lg:grid-cols-2">
@@ -188,8 +201,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
             )}
           </div>
 
-          {/* Divider */}
-          <div className="mt-8 border-t border-neutral-200 pt-8">
+          {/* Reviews */}
+          <div className="mt-6">
             <ProductReviewsSection
               productId={product.id}
               productName={product.name}
@@ -197,6 +210,33 @@ export default async function ProductPage({ params }: ProductPageProps) {
           </div>
 
         </div>
+
+        {/* ── Volt recommendations ── */}
+        {related.length > 0 && (
+          <div className="mt-4">
+            <h2 className="mb-4 font-bold tracking-tight text-neutral-900">
+              <span className="text-[27px]">Îți recomandăm și</span>
+            </h2>
+
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {related.map((p) => (
+                <ProductCard
+                  key={p.id}
+                  id={p.id}
+                  title={p.name}
+                  price={formatPrice(p.price)}
+                  priceRaw={p.price}
+                  oldPrice={p.old_price}
+                  detailHref={`/product/${p.id}`}
+                  imageUrl={p.image_url}
+                  stock={p.stock}
+                  category={p.category}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

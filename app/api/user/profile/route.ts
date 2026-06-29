@@ -23,17 +23,19 @@ type UserRow = {
   address: string | null;
   city: string | null;
   avatar_url: string | null;
+  is_two_factor_enabled: boolean;
 };
 
 function toPublicUser(row: UserRow) {
   return {
-    id:         row.id,
-    name:       row.name,
-    email:      row.email,
-    phone:      row.phone ?? undefined,
-    address:    row.address ?? undefined,
-    city:       row.city ?? undefined,
-    avatar_url: row.avatar_url ?? undefined,
+    id:                   row.id,
+    name:                 row.name,
+    email:                row.email,
+    phone:                row.phone ?? undefined,
+    address:              row.address ?? undefined,
+    city:                 row.city ?? undefined,
+    avatar_url:           row.avatar_url ?? undefined,
+    isTwoFactorEnabled:   row.is_two_factor_enabled,
   };
 }
 
@@ -62,7 +64,7 @@ export async function GET() {
   try {
     client = await pool.connect();
     const { rows } = await client.query<UserRow>(
-      `SELECT id, name, email, phone, address, city, avatar_url
+      `SELECT id, name, email, phone, address, city, avatar_url, is_two_factor_enabled
        FROM users
        WHERE id = $1 AND role = 'customer'`,
       [userId]

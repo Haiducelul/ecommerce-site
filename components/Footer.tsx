@@ -3,8 +3,8 @@ import { Cpu, Mail, MapPin, Phone } from "lucide-react";
 
 const PHONE = "+40 700 000 000";
 const PHONE_HREF = "tel:+40700000000";
-const EMAIL = "contact@techpoint.ro";
-const EMAIL_HREF = "mailto:contact@techpoint.ro";
+const EMAIL = "contact@buildtech.ro";
+const EMAIL_HREF = "mailto:contact@buildtech.ro";
 
 const QUICK_LINKS = [
   { label: "Despre noi", href: "#" },
@@ -77,8 +77,8 @@ export default function Footer() {
             <div className="mb-4 flex items-center gap-2">
               <Cpu className="size-5 shrink-0 text-[#22624a]" strokeWidth={1.75} aria-hidden />
               <span className="text-lg font-bold tracking-tight text-gray-900">
-                <span>TECH</span>
-                <span className="text-[#22624a]">POINT</span>
+                <span>Build</span>
+                <span className="text-[#22624a]">Tech</span>
               </span>
             </div>
             <p className="text-sm leading-relaxed text-gray-600">
@@ -151,7 +151,7 @@ export default function Footer() {
       {/* Copyright */}
       <div className="border-t border-gray-200 py-6">
         <p className="text-center text-xs text-gray-500 sm:text-sm">
-          © {new Date().getFullYear()} TechPoint. Toate drepturile rezervate.
+          © {new Date().getFullYear()} BuildTech. Toate drepturile rezervate.
         </p>
       </div>
     </footer>
